@@ -1,0 +1,4022 @@
+﻿FUNCTION "FC41_Modbus2Proc_DI" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      ModReg : DInt;
+      Faktor : Real;
+      enable : Bool;
+   END_VAR
+
+   VAR_IN_OUT 
+      Value : Real;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = 
+      UN #enable;
+      BEB;
+
+      L #ModReg;
+      DTR;
+      L #Faktor;
+      *R;
+      T #Value;
+
+END_FUNCTION
+
+FUNCTION_BLOCK "FB10_Sub_Biocos"
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+   VAR_INPUT 
+      ptr_PS_SW : Pointer;   // Zeiger auf Start Parametersatz
+      ptr_PS_IW : Pointer;   // Zeiger auf RM akt. Parametersatz
+      O2_Gehalt : Real;   // O2-Gehalt B-Becken
+      O2_Gehalt_AutoOk : Bool;
+      Auto_Bel_O2_Reg_FW : Real;   // Vorgabe Festwert Blockdrehzahl für Ansteuerung Gebläse
+      Auto_Bel_O2_Reg_GW_max : Real;   // Sollwert O2-Gehalt max -> Abschaltung Gebläse
+      Auto_Bel_O2_Reg_GW_ein : Real;   // Sollwert O2-Gehalt min -> Einschaltung Gebläse
+      Auto_Bel_O2_Reg_SW_max : Real;   // Sollwert O2-Gehalt max -> Gebläse auf min-Drehzahl
+      Auto_Bel_O2_Reg_SW_min : Real;   // Sollwert O2-Gehalt min -> Gebläse auf max-Drehzahl
+      Auto_Bel_O2_Reg_DZ_max : Real;   // Sollwert Blockdrehzahl max bei O2 min
+      Auto_Bel_O2_Reg_DZ_min : Real;   // Sollwert Blockdrehzahl min bei O2 max
+   END_VAR
+
+   VAR_OUTPUT 
+      BA_SU_RB : Bool;   // Schaltuhrbetrieb
+      BA_P1_RB : Bool;   // Parametersatz 1
+      BA_P2_RB : Bool;   // Parametersatz 2
+      BA_Aus_RB : Bool;   // Aus
+      Auto_P1_aktiv : Bool;   // Parametersatz 1 aktiv
+      Auto_P2_aktiv : Bool;   // Parametersatz 2 aktiv
+      Auto_Bel_O2_Ein_RB : Bool;   // Belüftung nach O2-Gehalt aktiv
+      Auto_Bel_O2_Aus_RB : Bool;   // Belüftung nach O2-Gehalt aus -> Intervallbelüftung
+      Auto_Bel_O2_St : Bool;   // Störung Messung O2-Gehalt -> Intervallbelüftung
+      Auto_Bel_O2_min : Bool;   // Belüftung nach O2-Gehalt -> min.-Wert nicht erreicht
+      Auto_UeSS_Menge_Ein_RB : Bool;   // ÜSS-Abzug nach Menge aktiv
+      Auto_UeSS_Menge_Aus_RB : Bool;   // ÜSS-Abzug nach Menge aus -> Zeit
+      Auto_UeSS_Menge_St : Bool;   // ÜSS-Abzug nach Menge -> Zeitüberschreitung
+      Auto_Bel_Phase : Bool;   // Belüftungsphase aktiv
+      Auto_Bel_Verz : Bool;   // Verzögerung bis Freigabe Belüftung
+      Auto_Bel_Frg : Bool;   // Freigabe Belüftung
+      Auto_Bel_Int : Bool;   // Belüftung im Intervall aktiv
+      Auto_UeSS : Bool;   // ÜSS-Abzug aktiv
+      Auto_U1 : Bool;   // U-Phase SU-Becken 1 aktiv
+      Auto_V1 : Bool;   // V-Phase SU-Becken 1 aktiv
+      Auto_A1 : Bool;   // A-Phase SU-Becken 1 aktiv
+      Auto_U2 : Bool;   // U-Phase SU-Becken 2 aktiv
+      Auto_V2 : Bool;   // V-Phase SU-Becken 2 aktiv
+      Auto_A2 : Bool;   // A-Phase SU-Becken 2 aktiv
+      Auto_SR1 : Bool;   // Schlammrückführung SU-Becken 1 aktiv
+      Auto_SR2 : Bool;   // Schlammrückführung SU-Becken 2 aktiv
+      Auto_UeSS_Zyk_IW : DInt;   // Zyklen bis ÜSS-Abzug - Istwert
+      Auto_U1_Zt_IW : DInt;   // U-Phase SU-Becken 1 - Istwert
+      Auto_V1_Zt_IW : DInt;   // V-Phase SU-Becken 1 - Istwert
+      Auto_A1_Zt_IW : DInt;   // A-Phase SU-Becken 1 - Istwert
+      Auto_U2_Zt_IW : DInt;   // U-Phase SU-Becken 2 - Istwert
+      Auto_V2_Zt_IW : DInt;   // V-Phase SU-Becken 2 - Istwert
+      Auto_A2_Zt_IW : DInt;   // A-Phase SU-Becken 2 - Istwert
+      Auto_Bel_Vz_IW : DInt;   // Verzögerungszeit Belüftungsphase - Istwert
+      Auto_Bel_Frg_IW : DInt;   // Belüftungsphase - Istwert
+      Auto_Bel_Int_IW : DInt;   // Belüftungsintervall - Istwert
+      Auto_Bel_Int_Zt_IW : DInt;   // Belüftungsdauer im Intervall - Istwert
+      Auto_UeSS_Zt_IW : DInt;   // ÜSS-Abzug Dauer - Istwert
+      Auto_UeSS_Df_IW : Real;   // ÜSS-Abzug Menge - Istwert
+      Auto_SR1_Zt_IW : DInt;   // Schlammrückführung SU-Becken 1 - Istwert
+      Auto_SR2_Zt_IW : DInt;   // Schlammrückführung SU-Becken 2 - Istwert
+      Auto_Bel_O2_Reg_IW : Real;   // Vorgabe Automatik Blockdrehzahl für Ansteuerung Gebläse
+      BA_O2_Reg_FW_RB : Bool;   // Betriebsart O2-Regler - Festwert - Rückmeldung
+      BA_O2_Reg_Auto_RB : Bool;   // Betriebsart O2-Regler - Automatik - Rückmeldung
+      Auto_Bel_O2_Reg_St : Bool;   // Automatik O2-Regler - Störung Messung O2-Gehalt -> Belüftung nach Festwert
+      Auto_Bel_O2_Reg_GW_max_AS : Bool;   // Automatik O2-Regler - Sollwert O2-Gehalt max -> Abschaltung Gebläse
+   END_VAR
+
+   VAR_IN_OUT 
+      BA_SU_BF : Bool;   // Schaltuhrbetrieb - Befehl
+      BA_P1_BF : Bool;   // Parametersatz 1 - Befehl
+      BA_P2_BF : Bool;   // Parametersatz 2 - Befehl
+      BA_Aus_BF : Bool;   // Aus - Befehl
+      Auto_Bel_O2_Ein_BF : Bool;   // Belüftung nach O2-Gehalt - Befehl Ein
+      Auto_Bel_O2_Aus_BF : Bool;   // Belüftung nach O2-Gehalt - Befehl Aus
+      Auto_UeSS_Menge_Ein_BF : Bool;   // ÜSS-Abzug nach Menge - Befehl Ein
+      Auto_UeSS_Menge_Aus_BF : Bool;   // ÜSS-Abzug nach Menge - Befehl Aus
+      BA_O2_Reg_FW_BF : Bool;   // Betriebsart O2-Regler - Festwert - Befehl
+      BA_O2_Reg_Auto_BF : Bool;   // Betriebsart O2-Regler - Automatik - Befehl
+   END_VAR
+
+   VAR 
+      PS1_req : Bool;
+      PS2_req : Bool;
+      Zyklus_RST : Bool;
+      TmrVar_U1_Zt : Int;
+      TmrVar_V1_Zt : Int;
+      TmrVar_A1_Zt : Int;
+      TmrVar_U2_Zt : Int;
+      TmrVar_V2_Zt : Int;
+      TmrVar_A2_Zt : Int;
+      TmrVar_Bel_Vz : Int;
+      TmrVar_Bel_Frg : Int;
+      TmrVar_Bel_Int_Zt : Int;
+      TmrVar_UeSS_Zt : Int;
+      TmrVar_SR1_Zt : Int;
+      TmrVar_SR2_Zt : Int;
+      TmrVar_Bel_O2_Zt_min : Int;
+      TmrVar_Bel_Int_Zt_fix : Int;
+      Tmr_U1_Zt_Q : Bool;
+      Tmr_V1_Zt_Q : Bool;
+      Tmr_A1_Zt_Q : Bool;
+      Tmr_U2_Zt_Q : Bool;
+      Tmr_V2_Zt_Q : Bool;
+      Tmr_A2_Zt_Q : Bool;
+      Tmr_Bel_Vz_Q : Bool;
+      Tmr_Bel_Frg_Q : Bool;
+      Tmr_Bel_Int_Zt_Q : Bool;
+      Tmr_UeSS_Zt_Q : Bool;
+      Tmr_SR1_Zt_Q : Bool;
+      Tmr_SR2_Zt_Q : Bool;
+      Tmr_Bel_O2_Zt_min_Q : Bool;
+      Tmr_Bel_Int_Zt_fix_Q : Bool;
+      FM_BA_Aus : Bool;
+      Auto_Bel_Int_Zt : Bool;
+      Auto_Bel_Int_Zt_RST : Bool;
+      FM_Auto_Bel_Int_Zt : Bool;
+      Auto_Bel_O2_min_erreicht : Bool;
+      FM_Auto_A1 : Bool;
+      FM_Auto_A2 : Bool;
+      UeSS_Abz_Frg : Bool;
+      UeSS_Abz_RST : Bool;
+      FM_Auto_UeSS : Bool;
+      FM_Auto_Bel_O2_Reg_GW_max_AS : Bool;
+      Auto_Bel_O2_Reg_Frg : Bool;   // Freigabe Regelalg. (nach Einschalten immer erst mit max. DZ fahren bis mittl. SW erreicht wurde)
+      FM_Auto_Bel_O2_Reg_Frg : Bool;
+      Menge_UeSS_Start : Real;
+      O2_Reg_MiW_Idx : Int;
+      O2_Reg_MiW_sum : Real;
+      O2_Reg_MiW : Real;
+      O2_Reg_SW : Real;
+   END_VAR
+
+   VAR_TEMP 
+      DB_PS_SW : Int;
+      DBPtr_PS_SW : DWord;
+      DBPtr_PS_offs : DWord;
+      DB_PS_IW : Int;
+      DBPtr_PS_IW : DWord;
+      Auto_Bel_O2_Int_SW : Real;   // Sollwert O2-Gehalt am Ende Belüftungsintervall
+      Auto_Bel_O2_min_SW : Real;   // Grenzwert Sauerstoffeintrag min. pro Belüftungsphase
+      Auto_Bel_O2_Zt_min_SW : DInt;   // Mindestbelüftungsdauer pro Intervall
+      Auto_UeSS_Zyk_SW : DInt;   // ÜSS-Abzug alle X Zyklen
+      Auto_P1_Start_SW : DInt;   // Startzeit Parametersatz 1
+      Auto_P2_Start_SW : DInt;   // Startzeit Parametersatz 2
+      Auto_U_Zt_Px_SW : DInt;   // Sollwert U-Phase
+      Auto_V_Zt_Px_SW : DInt;   // Sollwert V-Phase
+      Auto_A_Zt_Px_SW : DInt;   // Sollwert A-Phase (Rechenwert U+V)
+      Auto_Bel_Vz_Px_SW : DInt;   // Sollwert Verzögerungszeit Belüftungsphase
+      Auto_Bel_Frg_Px_SW : DInt;   // Sollwert Belüftungsphase Freigabe (Rechenwert V-Verz.)
+      Auto_Bel_Int_Px_SW : DInt;   // Sollwert Anzahl Belüftungsintervalle
+      Auto_Bel_Int_Zt_Px_SW : DInt;   // Sollwert Belüftungsdauer (fest) pro Intervall
+      Auto_Bel_Int_Zt_RW : DInt;   // Sollwert Belüftungsdauer (Rechenwert) pro Intervall
+      Auto_UeSS_Zt_Px_SW : DInt;   // Sollwert ÜSS-Abzug Dauer
+      Auto_UeSS_Df_Px_SW : Real;   // Sollwert ÜSS-Abzug Menge
+      Auto_SR1_Zt_Px_SW : DInt;   // Sollwert Dauer Schlammrückführung SU-Becken 1
+      Auto_SR2_Zt_Px_SW : DInt;   // Sollwert Dauer Schlammrückführung SU-Becken 2
+      i_tmp : Int;
+      di_tmp : DInt;
+      O2_Reg_y_d : Real;
+      O2_Req_x_d : Real;
+      Bel_Int_fix : Bool;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Verwaltung Parameter
+      L P##ptr_PS_IW;
+      LAR1;
+      TAR2;
+      +AR1;
+      L W[ AR1, P#0.0];
+      T #DB_PS_IW;
+      L D[ AR1, P#2.0];
+      T #DBPtr_PS_IW;
+
+      L P##ptr_PS_SW;
+      LAR1;
+      TAR2;
+      +AR1;
+      L W[ AR1, P#0.0];
+      T #DB_PS_SW;
+      L D[ AR1, P#2.0];
+      T #DBPtr_PS_SW;
+      LAR1;
+      AUF DB[ #DB_PS_SW];
+
+//feste Parameter
+      L DBD[ AR1, P#0.0];
+      T #Auto_Bel_O2_Int_SW;
+      L DBD[ AR1, P#4.0];
+      T #Auto_Bel_O2_min_SW;
+      L DBD[ AR1, P#8.0];
+      T #Auto_Bel_O2_Zt_min_SW;
+      L DBD[ AR1, P#12.0];
+      T #Auto_UeSS_Zyk_SW;
+      L DBD[ AR1, P#16.0];
+      T #Auto_P1_Start_SW;
+      L DBD[ AR1, P#20.0];
+      T #Auto_P2_Start_SW;
+//zeitabh. Parameter
+      L "akt_Std";
+      L #Auto_P1_Start_SW;
+      >=I;
+      U(;
+      L "akt_Std";
+      L #Auto_P2_Start_SW;
+      <I;
+      );
+      UN #Auto_P1_aktiv;
+      S #PS1_req;
+
+      L "akt_Std";
+      L #Auto_P2_Start_SW;
+      >=I;
+      O(;
+      L "akt_Std";
+      L #Auto_P1_Start_SW;
+      <I;
+      );
+      UN #Auto_P2_aktiv;
+      S #PS2_req;
+
+      UN #BA_SU_RB;
+      R #PS1_req;
+      R #PS2_req;
+//PS-Umschaltung immer vor Start eines neuen Zyklus
+      U #Zyklus_RST;
+      U #PS1_req;
+      R #PS1_req;
+      S #Auto_P1_aktiv;
+      R #Auto_P2_aktiv;
+
+      U #Zyklus_RST;
+      U #PS2_req;
+      R #PS2_req;
+      S #Auto_P2_aktiv;
+      R #Auto_P1_aktiv;
+
+      L P#60.0;
+      U #Auto_P2_aktiv;
+      SPB Offs_zw;
+      L P#24.0;
+Offs_zw:      T #DBPtr_PS_offs;
+
+      L #DBPtr_PS_SW;
+      LAR1;
+      L #DBPtr_PS_offs;
+      +AR1;
+
+      L DBD[ AR1, P#0.0];
+      T #Auto_U_Zt_Px_SW;
+      L DBD[ AR1, P#4.0];
+      T #Auto_V_Zt_Px_SW;
+      L DBD[ AR1, P#8.0];
+      T #Auto_Bel_Vz_Px_SW;
+      L DBD[ AR1, P#12.0];
+      T #Auto_Bel_Int_Px_SW;
+      L DBD[ AR1, P#16.0];
+      T #Auto_Bel_Int_Zt_Px_SW;
+      L DBD[ AR1, P#20.0];
+      T #Auto_UeSS_Zt_Px_SW;
+      L DBD[ AR1, P#24.0];
+      T #Auto_UeSS_Df_Px_SW;
+      L DBD[ AR1, P#28.0];
+      T #Auto_SR1_Zt_Px_SW;
+      L DBD[ AR1, P#32.0];
+      T #Auto_SR2_Zt_Px_SW;
+
+      L #Auto_U_Zt_Px_SW;
+      L #Auto_V_Zt_Px_SW;
+      +D;
+      T #Auto_A_Zt_Px_SW;
+
+      L #Auto_V_Zt_Px_SW;
+      L DINT#60;
+      *D;
+      L #Auto_Bel_Vz_Px_SW;//Wert in s
+      -D;
+      DTR;
+      L 60.0;
+      /R;
+      RND;
+      T #Auto_Bel_Frg_Px_SW;
+
+//aktuelle Parameter zurückmelden
+      L #DBPtr_PS_IW;
+      LAR1;
+      AUF DB[ #DB_PS_IW];
+
+      L #Auto_U_Zt_Px_SW;
+      T DBD[ AR1, P#0.0];
+      L #Auto_V_Zt_Px_SW;
+      T DBD[ AR1, P#4.0];
+      L #Auto_A_Zt_Px_SW;
+      T DBD[ AR1, P#8.0];
+      L #Auto_Bel_Vz_Px_SW;
+      T DBD[ AR1, P#12.0];
+      L #Auto_Bel_Frg_Px_SW;
+      T DBD[ AR1, P#16.0];
+      L #Auto_Bel_Int_Px_SW;
+      T DBD[ AR1, P#20.0];
+      L #Auto_Bel_Int_Zt_Px_SW;
+      T DBD[ AR1, P#24.0];
+      L #Auto_UeSS_Zt_Px_SW;
+      T DBD[ AR1, P#28.0];
+      L #Auto_UeSS_Df_Px_SW;
+      T DBD[ AR1, P#32.0];
+      L #Auto_SR1_Zt_Px_SW;
+      T DBD[ AR1, P#36.0];
+      L #Auto_SR2_Zt_Px_SW;
+      T DBD[ AR1, P#40.0];
+
+NETWORK
+TITLE = Betriebsart
+//BA Parametersatz
+      U #BA_SU_BF;
+      S #BA_SU_RB;
+      R #BA_P1_RB;
+      R #BA_P2_RB;
+
+      U #BA_P1_BF;
+      R #BA_SU_RB;
+      S #BA_P1_RB;
+      R #BA_P2_RB;
+      S #Auto_P1_aktiv;
+      R #Auto_P2_aktiv;
+
+      U #BA_P2_BF;
+      R #BA_SU_RB;
+      R #BA_P1_RB;
+      S #BA_P2_RB;
+      R #Auto_P1_aktiv;
+      S #Auto_P2_aktiv;
+
+      U #BA_Aus_BF;
+      R #BA_SU_RB;
+      R #BA_P1_RB;
+      R #BA_P2_RB;
+
+      UN #BA_SU_RB;
+      UN #BA_P1_RB;
+      UN #BA_P2_RB;
+      = #BA_Aus_RB;
+
+//BA O2-Gehalt
+      U #Auto_Bel_O2_Ein_BF;
+      R #Auto_Bel_O2_Aus_RB;
+      U #Auto_Bel_O2_Aus_BF;
+      S #Auto_Bel_O2_Aus_RB;
+
+      UN #Auto_Bel_O2_Aus_RB;
+      = #Auto_Bel_O2_Ein_RB;
+
+      UN #O2_Gehalt_AutoOk;
+      = #Auto_Bel_O2_St;
+
+//BA ÜSS-Abzug
+      U #Auto_UeSS_Menge_Ein_BF;
+      S #Auto_UeSS_Menge_Ein_RB;
+      U #Auto_UeSS_Menge_Aus_BF;
+      R #Auto_UeSS_Menge_Ein_RB;
+
+      UN #Auto_UeSS_Menge_Ein_RB;
+      = #Auto_UeSS_Menge_Aus_RB;
+
+//BA O2-Regler
+      U #BA_O2_Reg_FW_BF;
+      S #BA_O2_Reg_FW_RB;
+      U #BA_O2_Reg_Auto_BF;
+      R #BA_O2_Reg_FW_RB;
+
+      UN #BA_O2_Reg_FW_RB;
+      = #BA_O2_Reg_Auto_RB;
+
+      UN #O2_Gehalt_AutoOk;
+      U #BA_O2_Reg_Auto_RB;
+      = #Auto_Bel_O2_Reg_St;
+//CLR
+      CLR;
+      = #BA_SU_BF;
+      = #BA_P1_BF;
+      = #BA_P2_BF;
+      = #BA_Aus_BF;
+      = #Auto_Bel_O2_Ein_BF;
+      = #Auto_Bel_O2_Aus_BF;
+      = #Auto_UeSS_Menge_Ein_BF;
+      = #Auto_UeSS_Menge_Aus_BF;
+      = #BA_O2_Reg_FW_BF;
+      = #BA_O2_Reg_Auto_BF;
+
+NETWORK
+TITLE = Ablaufsteuerung
+
+      U #BA_Aus_RB;
+      R #Auto_Bel_Phase;
+      R #Auto_Bel_Verz;
+      R #Auto_Bel_Frg;
+      R #Auto_Bel_Int;
+      R #Auto_UeSS;
+      R #Auto_U1;
+      R #Auto_V1;
+      R #Auto_A1;
+      R #Auto_U2;
+      R #Auto_V2;
+      R #Auto_A2;
+      R #Auto_SR1;
+      R #Auto_SR2;
+
+      CLR;
+      = #Zyklus_RST;
+
+      U #BA_Aus_RB;
+      FN #FM_BA_Aus;
+      O #Tmr_A1_Zt_Q;
+      O #Tmr_A2_Zt_Q;
+      S #Zyklus_RST;
+
+//Start mit U1 und A2
+      UN #Auto_A1;
+      UN #Auto_A2;
+      O #Tmr_A1_Zt_Q;
+      UN #BA_Aus_RB;
+      R #Auto_Bel_Phase;
+      R #Auto_Bel_Verz;
+      R #Auto_Bel_Frg;
+      R #Auto_Bel_Int;
+      R #Auto_UeSS;
+      S #Auto_U1;
+      R #Auto_V1;
+      R #Auto_A1;
+      R #Auto_U2;
+      R #Auto_V2;
+      S #Auto_A2;
+      R #Auto_SR1;
+      S #Auto_SR2;
+
+      U #Tmr_SR2_Zt_Q;
+      R #Auto_SR2;
+
+//U1 -> V1
+      U #Tmr_U1_Zt_Q;
+      R #Auto_U1;
+      S #Auto_V1;
+      S #Auto_Bel_Phase;
+      S #Auto_Bel_Verz;
+
+//V1 -> A1/U2
+      U #Tmr_V1_Zt_Q;
+      R #Auto_V1;
+      S #Auto_A1;
+      S #Auto_SR1;
+      R #Auto_Bel_Phase;
+      S #Auto_U2;
+      R #Auto_A2;
+
+      U #Tmr_SR1_Zt_Q;
+      R #Auto_SR1;
+
+//U2 -> V2
+      U #Tmr_U2_Zt_Q;
+      R #Auto_U2;
+      S #Auto_V2;
+      S #Auto_Bel_Phase;
+      S #Auto_Bel_Verz;
+
+//V2 -> A2/U1
+  //...siehe Start Zyklus
+
+
+
+NETWORK
+TITLE = Belüftung
+
+//Verzögerung nach Start Belüftungsphase (V-Phase)
+
+      U #Tmr_Bel_Vz_Q;
+      R #Auto_Bel_Verz;
+      S #Auto_Bel_Frg;
+//      SPBN  BelIntTm_zw
+//Dauer Intervall ermitteln
+      L #Auto_Bel_Frg_Px_SW;
+      L 60;
+      *I;
+      T #i_tmp;
+
+      L #Auto_Bel_Int_Px_SW;
+      L 1;
+      <I;
+      SPB BelInt_zw;
+      TAK;
+BelInt_zw:      L #i_tmp;
+      TAK;
+      /I;
+      T #Auto_Bel_Int_Zt_RW;
+
+BelIntTm_zw:      NOP 0;
+
+      UN #Auto_Bel_Phase;
+      R #Auto_Bel_Verz;
+      R #Auto_Bel_Frg;
+
+      UN #Tmr_Bel_Int_Zt_Q;
+      U #Auto_Bel_Frg;
+      = #Auto_Bel_Int_Zt;
+
+      U #Zyklus_RST;
+      L #Auto_Bel_Int_Px_SW;
+      SPB AnzInt_zw;
+
+      U #Auto_Bel_Int_Zt;
+      FP #FM_Auto_Bel_Int_Zt;
+      O(;
+      U #Auto_Bel_O2_Reg_GW_max_AS;
+      FN #FM_Auto_Bel_O2_Reg_GW_max_AS;
+      U #Auto_Bel_Frg;
+      );
+      S #Auto_Bel_Int;
+      R #Auto_Bel_O2_Reg_Frg;
+      L #Auto_Bel_Int_IW;
+      SPBN AnzInt_zw;
+//Anzahl Intervalle
+      DEC 1;
+AnzInt_zw:      T #Auto_Bel_Int_IW;
+
+      U #Auto_Bel_O2_St;
+      O #Auto_Bel_O2_Aus_RB;
+      = #Bel_Int_fix;
+
+      U #Tmr_Bel_Int_Zt_fix_Q;
+      U #Bel_Int_fix;
+      O(;
+      L #O2_Gehalt;
+      L #Auto_Bel_O2_Int_SW;
+      >=R;
+      UN #Bel_Int_fix;
+      U #BA_O2_Reg_FW_RB;
+      );
+      O(;
+      U #Auto_Bel_O2_Reg_GW_max_AS;
+      UN #Bel_Int_fix;
+      U #BA_O2_Reg_Auto_RB;
+      );
+      U #Tmr_Bel_O2_Zt_min_Q;
+      ON #Auto_Bel_Frg;
+      R #Auto_Bel_Int;
+
+
+//Mindestbelüftungsdauer im Intervall
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_Bel_Int_Zt , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_Bel_O2_Zt_min_SW , 
+         SW_IW_fakt                  := 1 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #di_tmp , 
+         TmrVar                      := #TmrVar_Bel_O2_Zt_min , 
+         Q                           := #Tmr_Bel_O2_Zt_min_Q
+      );
+
+//feste Belüftungsdauer im Intervall (Option oder O2 Störung)
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_Bel_Int_Zt , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_Bel_Int_Zt_Px_SW , 
+         SW_IW_fakt                  := 1 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #di_tmp , 
+         TmrVar                      := #TmrVar_Bel_Int_Zt_fix , 
+         Q                           := #Tmr_Bel_Int_Zt_fix_Q
+      );
+
+//Überwachung O2-Gehalt im Belüftungszyklus
+
+      L #O2_Gehalt;
+      L #Auto_Bel_O2_min_SW;
+      >=R;
+      U #Auto_Bel_Int;
+      S #Auto_Bel_O2_min_erreicht;
+//...am Ende einer Belüftungsphase schauen, ob O2 min erreicht wurde (mind. 1 Intervall)
+      U #Tmr_A1_Zt_Q;
+      O #Tmr_A2_Zt_Q;
+      UN #Bel_Int_fix;
+      UN #Auto_Bel_O2_min_erreicht;
+      S #Auto_Bel_O2_min;
+
+//...Meldung steht bis zum Beginn der nächsten Belüftung an
+      U #Tmr_U1_Zt_Q;
+      O #Tmr_U2_Zt_Q;
+      R #Auto_Bel_O2_min;
+
+      U #Zyklus_RST;
+      R #Auto_Bel_O2_min_erreicht;
+
+
+
+NETWORK
+TITLE = Belüftung - O2-Regler
+//Sollwertprüfung
+
+      L #Auto_Bel_O2_Reg_DZ_max;
+      L #Auto_Bel_O2_Reg_DZ_min;
+      -R;
+      L 1000.0;
+      <R;
+      SPB O2_Reg_y_d_ok;
+      TAK;
+O2_Reg_y_d_ok:      T #O2_Reg_y_d;
+
+      L #Auto_Bel_O2_Reg_SW_max;
+      L #Auto_Bel_O2_Reg_SW_min;
+      -R;
+      L 0.2;
+      <R;
+      SPB O2_Reg_x_d_ok;
+      TAK;
+O2_Reg_x_d_ok:      T #O2_Req_x_d;
+      L 2.0;
+      /R;
+      L #Auto_Bel_O2_Reg_SW_min;
+      +R;
+      T #O2_Reg_SW;
+
+//Minutenwert für O2 ermitteln
+      L #O2_Gehalt;
+      UN #Auto_Bel_O2_Reg_Frg;
+      R #FM_Auto_Bel_O2_Reg_Frg;
+      SPB O2_Reg_MiW_zw;
+      U #FM_Auto_Bel_O2_Reg_Frg;
+      SPB O2_Reg_MiW_init;
+      SET;
+      = #FM_Auto_Bel_O2_Reg_Frg;
+      L 0;
+      T #O2_Reg_MiW_Idx;
+      L 0.0;
+      T #O2_Reg_MiW_sum;
+
+O2_Reg_MiW_init:      L #O2_Reg_MiW;
+      U "Imp_Sek";
+      SPBN O2_Reg_MiW_zw;
+      L #O2_Gehalt;
+      L #O2_Reg_MiW_sum;
+      +R;
+      T #O2_Reg_MiW_sum;
+      L #O2_Reg_MiW_Idx;
+      L 1;
+      +I;
+      T #O2_Reg_MiW_Idx;
+      L 60;
+      <I;
+      SPB O2_Reg_MiW_end;
+//neuen Zyklus initialisieren
+      CLR;
+      = #FM_Auto_Bel_O2_Reg_Frg;
+
+      L #O2_Reg_MiW_sum;
+      L 60.0;
+      /R;
+O2_Reg_MiW_zw:      T #O2_Reg_MiW;
+O2_Reg_MiW_end:      NOP 0;
+
+//Grenzwertüberwachung
+
+      L #O2_Gehalt;
+      L #O2_Reg_SW;
+      >=R;
+      U #Auto_Bel_Int;
+      S #Auto_Bel_O2_Reg_Frg;
+
+      UN #Auto_Bel_Frg;
+      ON #BA_O2_Reg_Auto_RB;
+      R #Auto_Bel_O2_Reg_Frg;
+
+      L #O2_Reg_MiW;
+      L #Auto_Bel_O2_Reg_GW_max;
+      >=R;
+      S #Auto_Bel_O2_Reg_GW_max_AS;
+
+      L #O2_Reg_MiW;
+      L #Auto_Bel_O2_Reg_GW_ein;
+      <=R;
+      ON #Auto_Bel_Frg;
+      ON #BA_O2_Reg_Auto_RB;
+      R #Auto_Bel_O2_Reg_GW_max_AS;
+
+//Stellwertgenerierung für Gebläse (Sigma Control)
+      L #O2_Reg_MiW;
+      L #Auto_Bel_O2_Reg_SW_max;
+      >R;
+      SPB O2_Reg_O2_max;
+      TAK;
+O2_Reg_O2_max:      L #Auto_Bel_O2_Reg_SW_min;
+      <R;
+      SPB O2_Reg_O2_min;
+      TAK;
+O2_Reg_O2_min:      L #Auto_Bel_O2_Reg_SW_min;
+      -R;
+      L -1.0;//m ist negativ
+      *R;
+      L #O2_Reg_y_d;
+      *R;
+      L #O2_Req_x_d;
+      /R;
+      L #Auto_Bel_O2_Reg_DZ_max;
+      +R;
+
+      U #Auto_Bel_Frg;
+      U #BA_O2_Reg_Auto_RB;
+      SPB O2_Reg_SW_zw;
+      L #Auto_Bel_O2_Reg_FW;
+O2_Reg_SW_zw:      T #Auto_Bel_O2_Reg_IW;
+
+NETWORK
+TITLE = ÜSS-Abzug
+
+      U #Tmr_A1_Zt_Q;
+      U #UeSS_Abz_Frg;
+      S #UeSS_Abz_RST;
+
+      U #UeSS_Abz_RST;
+      R #UeSS_Abz_RST;
+      L 0;
+      SPB UeSSZyk_zw;
+
+      U #Auto_A1;
+      FP #FM_Auto_A1;
+//      O(
+//      U     #Auto_A2
+//      FP    #FM_Auto_A2
+//      )
+      L #Auto_UeSS_Zyk_IW;
+      SPBN UeSSZyk_zw;
+      INC 1;
+UeSSZyk_zw:      T #Auto_UeSS_Zyk_IW;
+      L #Auto_UeSS_Zyk_SW;
+      >=I;
+      = #UeSS_Abz_Frg;
+
+//Startzeit bestimmen (Einstellwert vor Ende Abzugsphase)
+
+      L #Auto_A1_Zt_IW;
+      L #Auto_UeSS_Zt_Px_SW;
+      <=D;
+      U #Auto_A1;
+//      O(
+//      TAK
+//      L     #Auto_A2_Zt_IW
+//      <=D
+//      U     #Auto_A2
+//      )
+      U #UeSS_Abz_Frg;
+      FP #FM_Auto_UeSS;
+      S #Auto_UeSS;
+      SPBN UeSS_DF_init;
+      L "ZEN_MW".BB_UeSS_DF_ZW;
+      T #Menge_UeSS_Start;
+UeSS_DF_init:      NOP 0;
+
+      U #Auto_UeSS_Menge_Ein_RB;
+      U #Zyklus_RST;
+      U #Auto_UeSS;
+      S #Auto_UeSS_Menge_St;
+
+      U #Tmr_U1_Zt_Q;
+      O #Tmr_U2_Zt_Q;
+      R #Auto_UeSS_Menge_St;
+
+      U #Auto_UeSS;
+      L #Auto_UeSS_Df_IW;
+      SPBN UeSS_Df_IW_zw;
+      L "ZEN_MW".BB_UeSS_DF_ZW;
+      L #Menge_UeSS_Start;
+      -R;
+UeSS_Df_IW_zw:      T #Auto_UeSS_Df_IW;
+      L #Auto_UeSS_Df_Px_SW;
+      >=R;
+      U #Auto_UeSS_Menge_Ein_RB;
+      O #Zyklus_RST;
+      R #Auto_UeSS;
+
+
+NETWORK
+TITLE = Timer
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_U1 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_U_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_U1_Zt_IW , 
+         TmrVar                      := #TmrVar_U1_Zt , 
+         Q                           := #Tmr_U1_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_V1 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_V_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_V1_Zt_IW , 
+         TmrVar                      := #TmrVar_V1_Zt , 
+         Q                           := #Tmr_V1_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_A1 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_A_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_A1_Zt_IW , 
+         TmrVar                      := #TmrVar_A1_Zt , 
+         Q                           := #Tmr_A1_Zt_Q
+      );
+
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_U2 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_U_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_U2_Zt_IW , 
+         TmrVar                      := #TmrVar_U2_Zt , 
+         Q                           := #Tmr_U2_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_V2 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_V_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_V2_Zt_IW , 
+         TmrVar                      := #TmrVar_V2_Zt , 
+         Q                           := #Tmr_V2_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_A2 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_A_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_A2_Zt_IW , 
+         TmrVar                      := #TmrVar_A2_Zt , 
+         Q                           := #Tmr_A2_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_Bel_Verz , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_Bel_Vz_Px_SW , 
+         SW_IW_fakt                  := 1 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_Bel_Vz_IW , 
+         TmrVar                      := #TmrVar_Bel_Vz , 
+         Q                           := #Tmr_Bel_Vz_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_Bel_Frg , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_Bel_Frg_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_Bel_Frg_IW , 
+         TmrVar                      := #TmrVar_Bel_Frg , 
+         Q                           := #Tmr_Bel_Frg_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_Bel_Int_Zt , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_Bel_Int_Zt_RW , 
+         SW_IW_fakt                  := 1 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_Bel_Int_Zt_IW , 
+         TmrVar                      := #TmrVar_Bel_Int_Zt , 
+         Q                           := #Tmr_Bel_Int_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_SR1 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_SR1_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_SR1_Zt_IW , 
+         TmrVar                      := #TmrVar_SR1_Zt , 
+         Q                           := #Tmr_SR1_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_SR2 , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_SR2_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_SR2_Zt_IW , 
+         TmrVar                      := #TmrVar_SR2_Zt , 
+         Q                           := #Tmr_SR2_Zt_Q
+      );
+
+      CALL "FC65_TON_s_BB"
+      (  enable                      := #Auto_UeSS , 
+         RST                         := #Zyklus_RST , 
+         Tmr_SW                      := #Auto_UeSS_Zt_Px_SW , 
+         SW_IW_fakt                  := 60 , 
+         Tmr_IW                      := #di_tmp , 
+         Tmr_left                    := #Auto_UeSS_Zt_IW , 
+         TmrVar                      := #TmrVar_UeSS_Zt , 
+         Q                           := #Tmr_UeSS_Zt_Q
+      );
+
+
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB11_Sub_PW"
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Idx : Int;   // Idx in PW-Liste (0-basiert)
+      Niv_Frg : Real;   // Niveau für Ab-/Zuschaltung PW
+      Frg_Aus : Bool;   // alle Freigaben ausschalten
+      Frg_Ein : Bool;   // alle Freigaben einschalten
+      Sperre_ext : Bool;   // Sperre PW extern (andere PW)
+      DF_Skal : Real := 10.0;   // Skalierung für DF-Wert
+      Dr_Skal : Real;   // Skalierung für Druck-Wert
+      Res_Skal : Real := 100.0;   // Skalierung für Reserve-Wert
+      Niv_Skal : Real := 100.0;   // Skalierung für Niveau
+   END_VAR
+
+   VAR_IN_OUT 
+      IEC_Image : "T_IEC_PW_Image";
+      PW_Meld : "T_PW_MELD";
+      PW_Bef : "T_PW_BEF";
+      AS_Zyk : Bool;
+      ZS_Zyk : Bool;
+      RM_Frg_Ein : Bool;   // alle Freigaben eingeschaltet
+      RM_Frg_TeilAus : Bool;   // mindestens eine Freigabe abgeschaltet
+      RM_Frg_Aus : Bool;   // alle Freigaben ausgeschaltet
+   END_VAR
+
+   VAR 
+      FM_FWA_St : Bool;
+      FM_FWA_P_St : Bool;
+      FM_FWA_Ausf1 : Bool;
+      FM_FWA_Ausf2 : Bool;
+      FM_FWA_P1_St : Bool;
+      FM_FWA_P2_St : Bool;
+      FM_FWA_Niv_max : Bool;
+      FM_FWA_EA_St : Bool;
+      FM_Kom_St : Bool;
+      FM_RM_St : Bool;
+      int_Frg_Aus : Bool;
+      FM_FWA_Bef_Auto : Bool;
+      FM_FWA_Bef_Aus : Bool;
+      Tmr_RM_St {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      Tmr_Bef_Sperre_Auto {InstructionName := 'TOF_TIME'; LibVersion := '1.0'} : TOF_TIME;
+      Tmr_Bef_Sperre_Aus {InstructionName := 'TOF_TIME'; LibVersion := '1.0'} : TOF_TIME;
+   END_VAR
+
+   VAR_TEMP 
+      T_IN : Bool;
+      retval : Word;
+      e : Date_And_Time;
+      dx : Date_And_Time;
+      et : Time;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Meldungen rangieren
+      U #IEC_Image.FWA_St.SPI;
+      = #PW_Meld.Status.FWA_St;
+      U #IEC_Image.FWA_P_St.SPI;
+      = #PW_Meld.Status.FWA_P_St;
+      U #IEC_Image.FWA_Ausf1.SPI;
+      = #PW_Meld.Status.FWA_Ausf1;
+      U #IEC_Image.FWA_Ausf2.SPI;
+      = #PW_Meld.Status.FWA_Ausf2;
+      U #IEC_Image.FWA_P1_St.SPI;
+      = #PW_Meld.Status.FWA_P1_St;
+      U #IEC_Image.FWA_P2_St.SPI;
+      = #PW_Meld.Status.FWA_P2_St;
+      U #IEC_Image.FWA_Niv_max.SPI;
+      = #PW_Meld.Status.FWA_Niv_max;
+      U #IEC_Image.FWA_EA_St.SPI;
+      = #PW_Meld.Status.FWA_EA_St;
+      U #IEC_Image.FWA_BA_Auto.SPI;
+      = #PW_Meld.Status.FWA_BA_Auto;
+      U #IEC_Image.FWA_Betrieb.SPI;
+      = #PW_Meld.Status.FWA_Betrieb;
+
+
+      U "DB_IEC_ASDUAdr".ASDU_Adr_Para[#Idx].Error;
+      = #PW_Meld.Status.Kom_St;
+
+      U #IEC_Image.MW_DF.OV;
+      O #IEC_Image.MW_DF.IV;
+      CLR;
+      = #PW_Meld.Status.MW_DF_St;
+
+      U #IEC_Image.MW_Dr.OV;
+      O #IEC_Image.MW_Dr.IV;
+      = #PW_Meld.Status.MW_Dr_St;
+
+      U #IEC_Image.MW_Niv.OV;
+      O #IEC_Image.MW_Niv.IV;
+      = #PW_Meld.Status.MW_Niv_St;
+
+      U #IEC_Image.MW_Res.OV;
+      O #IEC_Image.MW_Res.IV;
+      = #PW_Meld.Status.MW_Res_St;
+
+      L #IEC_Image.MW_DF.Value;
+      ITD;
+      DTR;
+      L #DF_Skal;
+      *R;
+      L 32767.0;
+      /R;
+      T #PW_Meld.MW_DF;
+
+      L #IEC_Image.MW_Dr.Value;
+      ITD;
+      DTR;
+      L #Dr_Skal;
+      *R;
+      L 32767.0;
+      /R;
+      T #PW_Meld.MW_Dr;
+
+      L #IEC_Image.MW_Niv.Value;
+      ITD;
+      DTR;
+      L #Niv_Skal;
+      *R;
+      L 32767.0;
+      /R;
+      T #PW_Meld.MW_Niv;
+
+      L #IEC_Image.MW_Res.Value;
+      ITD;
+      DTR;
+      L #Res_Skal;
+      *R;
+      L 32767.0;
+      /R;
+      T #PW_Meld.MW_Res;
+
+
+NETWORK
+TITLE = Befehlsrichtung
+      CLR;
+
+      U #PW_Meld.Status.FWA_Bef_Auto;
+      UN #PW_Meld.Status.FWA_BA_Auto;
+      UN #Tmr_Bef_Sperre_Auto.Q;
+      FP #FM_FWA_Bef_Auto;
+      S #IEC_Image.FWA_Bef_Auto.SCS;
+
+      CLR;
+
+      U #PW_Meld.Status.FWA_Bef_Aus;
+      U #PW_Meld.Status.FWA_BA_Auto;
+      UN #Tmr_Bef_Sperre_Aus.Q;
+      FP #FM_FWA_Bef_Aus;
+      S #IEC_Image.FWA_Bef_Aus.SCS;
+
+      U #IEC_Image.FWA_Bef_Auto.SCS;
+      = #T_IN;
+
+      CALL #Tmr_Bef_Sperre_Auto
+      {time_type := 'Time'}
+      (  IN                          := #T_IN , 
+         PT                          := T#30s , 
+         ET                          := #et
+      );
+
+      U #IEC_Image.FWA_Bef_Aus.SCS;
+      = #T_IN;
+
+      CALL #Tmr_Bef_Sperre_Aus
+      {time_type := 'Time'}
+      (  IN                          := #T_IN , 
+         PT                          := T#30s , 
+         ET                          := #et
+      );
+
+
+      U #PW_Meld.Status.FWA_Bef_Auto;
+      X #PW_Meld.Status.FWA_BA_Auto;
+      CLR;
+      = #T_IN;
+
+      CALL #Tmr_RM_St
+      {time_type := 'Time'}
+      (  IN                          := #T_IN , 
+         PT                          := T#20s
+      );
+
+      U #Tmr_RM_St.Q;
+      = #PW_Meld.Status.RM_St;
+
+
+NETWORK
+TITLE = Betriebsart
+      U #PW_Bef.Befehl.BA_Aus;
+      S #PW_Meld.Status.Frg_Aus;
+      R #PW_Meld.Status.Frg_Ein;
+
+      U #PW_Bef.Befehl.BA_Ein;
+      R #PW_Meld.Status.Frg_Aus;
+      S #PW_Meld.Status.Frg_Ein;
+
+      U #PW_Bef.Befehl.BA_Auto;
+      R #PW_Meld.Status.Frg_Aus;
+      R #PW_Meld.Status.Frg_Ein;
+
+      UN #PW_Meld.Status.Frg_Aus;
+      UN #PW_Meld.Status.Frg_Ein;
+      = #PW_Meld.Status.Frg_Auto;
+
+      U #PW_Meld.Status.FWA_St;
+      FP #FM_FWA_St;
+      O(;
+      U #PW_Meld.Status.FWA_P_St;
+      FP #FM_FWA_P_St;
+      );
+      O(;
+      U #PW_Meld.Status.FWA_Ausf1;
+      FP #FM_FWA_Ausf1;
+      );
+      O(;
+      U #PW_Meld.Status.FWA_Ausf2;
+      FP #FM_FWA_Ausf2;
+      );
+      O(;
+      U #PW_Meld.Status.FWA_P1_St;
+      FP #FM_FWA_P1_St;
+      );
+      O(;
+      U #PW_Meld.Status.FWA_P2_St;
+      FP #FM_FWA_P2_St;
+      );
+      O(;
+      U #PW_Meld.Status.FWA_Niv_max;
+      FP #FM_FWA_Niv_max;
+      );
+      O(;
+      U #PW_Meld.Status.FWA_EA_St;
+      FP #FM_FWA_EA_St;
+      );
+      O(;
+      U #PW_Meld.Status.Kom_St;
+      FP #FM_Kom_St;
+      );
+      O(;
+      U #PW_Meld.Status.RM_St;
+      FP #FM_RM_St;
+      );
+      S #PW_Meld.Status.BB_SSnq;
+
+      U #PW_Bef.Befehl.BF_Quit;
+      O "Global_Quit";
+      R #PW_Meld.Status.BB_SSnq;
+
+      U #PW_Meld.Status.FWA_St;
+      O #PW_Meld.Status.FWA_P_St;
+      O #PW_Meld.Status.FWA_Ausf1;
+      O #PW_Meld.Status.FWA_Ausf2;
+      O #PW_Meld.Status.FWA_P1_St;
+      O #PW_Meld.Status.FWA_P2_St;
+      O #PW_Meld.Status.FWA_Niv_max;
+      O #PW_Meld.Status.FWA_EA_St;
+      O #PW_Meld.Status.Kom_St;
+      O #PW_Meld.Status.RM_St;
+      = #PW_Meld.Status.BB_SS;
+
+      UN #PW_Meld.Status.Frg_Auto;
+      O #PW_Meld.Status.FWA_St;
+      O #PW_Meld.Status.FWA_Ausf1;
+      O #PW_Meld.Status.FWA_Ausf2;
+      O #PW_Meld.Status.Kom_St;
+      NOT;
+      = #PW_Meld.Status.BB_AutoOk;
+
+      CLR;
+      = #PW_Bef.Befehl.BA_Aus;
+      = #PW_Bef.Befehl.BA_Ein;
+      = #PW_Bef.Befehl.BA_Auto;
+      = #PW_Bef.Befehl.BF_Quit;
+
+NETWORK
+TITLE = Automatik
+
+      L #PW_Meld.MW_Niv;
+      L #Niv_Frg;
+      <R;
+      U #AS_Zyk;
+      UN #int_Frg_Aus;
+      O #Frg_Aus;
+      U #PW_Meld.Status.Frg_Auto;
+      S #int_Frg_Aus;
+      R #AS_Zyk;
+
+      L #PW_Meld.MW_Niv;
+      L #Niv_Frg;
+      >R;
+      U #ZS_Zyk;
+      U #int_Frg_Aus;
+      O #Frg_Ein;
+      U #PW_Meld.Status.Frg_Auto;
+      R #int_Frg_Aus;
+      R #ZS_Zyk;
+
+      U #PW_Meld.Status.Frg_Aus;
+      S #int_Frg_Aus;
+      U #PW_Meld.Status.Frg_Ein;
+      R #int_Frg_Aus;
+
+      UN #int_Frg_Aus;
+      UN(;
+      U #Sperre_ext;
+      U #PW_Meld.Status.Frg_Auto;
+      );
+      = #PW_Meld.Status.FWA_Bef_Auto;
+      R #RM_Frg_Aus;
+      U #int_Frg_Aus;
+      O(;
+      U #Sperre_ext;
+      U #PW_Meld.Status.Frg_Auto;
+      );
+      = #PW_Meld.Status.FWA_Bef_Aus;
+      R #RM_Frg_Ein;
+      S #RM_Frg_TeilAus;
+
+
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB52_Messwert"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Typ : Int;
+      Idx { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;   // Index in Textliste "Messungen"
+   END_VAR
+
+   VAR_IN_OUT 
+      EA : "T_MW_EA";
+      MELD : "T_MW_MELD";
+      BEF : "T_MW_BEF";
+      PRM : "T_MW_PRM";
+      MW_MemDB : "T_MW_MITTEL";
+   END_VAR
+
+   VAR 
+      MW_Mittel { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : "FB53_Mittelwert";
+      BA_VW_PLS_Nrm : Bool;   // Vorwahl PLS - Betriebsart - Normalbetrieb
+      BA_VW_PLS_Frz : Bool;   // Vorwahl PLS - Betriebsart - Wert halten
+      BA_VW_PLS_EW : Bool;   // Vorwahl PLS - Betriebsart - Ersatzwert
+      BA_VW_PLS_Sim : Bool;   // Vorwahl PLS - Betriebsart - Simulation
+      BA_VW_PLS_Wart : Bool;   // Vorwahl PLS - Betriebsart - Wartung
+      BA_Anf_Frz : Bool;   // Anforderung Prozess - Betriebsart - Wert halten
+      BA_Anf_EW : Bool;   // Anforderung Prozess - Betriebsart - Ersatzwert
+      BA_Anf_Wart : Bool;   // Anforderung Prozess - Betriebsart - Wartung
+      Allg_St : Bool;   // Störung elektrisch/allgemein
+      mA_St : Bool;   // Störung Drahtbruch
+      OF_St : Bool;   // Störung Überlauf
+      UF_St : Bool;   // Störung Unterlauf
+      Kom_DP_St : Bool;   // Störung dezentrale Peripherie
+      Kom_int_St : Bool;   // Störung Kommunikation intern
+      int_St : Bool;   // Störung intern
+      SS : Bool;
+      SSnq : Bool;
+      GW_HH : Bool;   // Grenzwertmeldung - Alarmgrenze oben
+      GW_H : Bool;   // Grenzwertmeldung - Warngrenze oben
+      GW_L : Bool;   // Grenzwertmeldung - Warngrenze unten
+      GW_LL : Bool;   // Grenzwertmeldung - Alarmgrenze unten
+      MW_nok : Bool;   // Messwert von Peripherie unbrauchbar -> Störungsverarbeitung
+      MW_hold : Bool;
+      Tmr_Allg_St : Int;   // Störung elektrisch/allgemein
+      Tmr_mA_St : Int;   // Störung Drahtbruch
+      Tmr_OF_St : Int;   // Störung Überlauf
+      Tmr_UF_St : Int;   // Störung Unterlauf
+      Tmr_Kom_DP_St : Int;   // Störung dezentrale Peripherie
+      Tmr_Kom_int_St : Int;   // Störung Kommunikation intern
+      Tmr_int_St : Int;   // Störung intern
+      Tmr_GW_HH : Int;   // Grenzwertmeldung - Alarmgrenze oben
+      Tmr_GW_H : Int;   // Grenzwertmeldung - Warngrenze oben
+      Tmr_GW_L : Int;   // Grenzwertmeldung - Warngrenze unten
+      Tmr_GW_LL : Int;   // Grenzwertmeldung - Alarmgrenze unten
+      MW_Peri_last_valid : Word;   // letzter gültiger Peripheriewert
+      MW_Peri_PW_last_valid : Real;   // letzter gültiger Prozesswert
+      MW_Skal_last_valid : Real;   // letzter gültiger Messwert skaliert
+      MW_akt_nofilt : Real;   // Messwert resultierend ungefiltert
+      MW_AVG_Adr_akt : Int;
+      MW_AVG_Adr_MW_Valid : Int;
+   END_VAR
+
+   VAR_TEMP 
+      b_tmp : Bool;
+      ZI_Quit : Bool;
+      iTime : Int;
+      Peri_Offs : Int;
+      Peri_Range : Int;
+      Peri_TolRange : Int;
+      i_tmp : Int;
+      MW_GW_chk : Real;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Betriebsartvorwahl und Optionen
+//Vorwahl Betriebsmodi von PLS
+      U #BEF.Bef.BA_Nrm;
+      O(;
+      UN #BA_VW_PLS_Nrm;
+      UN #BA_VW_PLS_Frz;
+      UN #BA_VW_PLS_EW;
+      UN #BA_VW_PLS_Sim;
+      UN #BA_VW_PLS_Wart;
+      );
+      S #BA_VW_PLS_Nrm;
+      R #BA_VW_PLS_Frz;
+      R #BA_VW_PLS_EW;
+      R #BA_VW_PLS_Sim;
+      R #BA_VW_PLS_Wart;
+
+      U #BEF.Bef.BA_Frz;
+      R #BA_VW_PLS_Nrm;
+      S #BA_VW_PLS_Frz;
+      R #BA_VW_PLS_EW;
+      R #BA_VW_PLS_Sim;
+      R #BA_VW_PLS_Wart;
+
+      U #BEF.Bef.BA_EW;
+      R #BA_VW_PLS_Nrm;
+      R #BA_VW_PLS_Frz;
+      S #BA_VW_PLS_EW;
+      R #BA_VW_PLS_Sim;
+      R #BA_VW_PLS_Wart;
+
+      U #BEF.Bef.BA_Sim;
+      R #BA_VW_PLS_Nrm;
+      R #BA_VW_PLS_Frz;
+      R #BA_VW_PLS_EW;
+      S #BA_VW_PLS_Sim;
+      R #BA_VW_PLS_Wart;
+
+      U #BEF.Bef.BA_Wart;
+      R #BA_VW_PLS_Nrm;
+      R #BA_VW_PLS_Frz;
+      R #BA_VW_PLS_EW;
+      R #BA_VW_PLS_Sim;
+      S #BA_VW_PLS_Wart;
+
+//Befehle zurücksetzen
+      CLR;
+      = #BEF.Bef.BA_Nrm;
+      = #BEF.Bef.BA_Frz;
+      = #BEF.Bef.BA_EW;
+      = #BEF.Bef.BA_Sim;
+      = #BEF.Bef.BA_Wart;
+
+
+//Grenzwertüberwachung ein-/ausschalten
+      U #BEF.Bef.Frg_HH;
+      U #MELD.Status.Frg_HH;
+      R #MELD.Status.Frg_HH;
+      R #BEF.Bef.Frg_HH;
+
+      U #BEF.Bef.Frg_HH;
+      S #MELD.Status.Frg_HH;
+      R #BEF.Bef.Frg_HH;
+
+
+      U #BEF.Bef.Frg_H;
+      U #MELD.Status.Frg_H;
+      R #MELD.Status.Frg_H;
+      R #BEF.Bef.Frg_H;
+
+      U #BEF.Bef.Frg_H;
+      S #MELD.Status.Frg_H;
+      R #BEF.Bef.Frg_H;
+
+
+      U #BEF.Bef.Frg_L;
+      U #MELD.Status.Frg_L;
+      R #MELD.Status.Frg_L;
+      R #BEF.Bef.Frg_L;
+
+      U #BEF.Bef.Frg_L;
+      S #MELD.Status.Frg_L;
+      R #BEF.Bef.Frg_L;
+
+
+      U #BEF.Bef.Frg_LL;
+      U #MELD.Status.Frg_LL;
+      R #MELD.Status.Frg_LL;
+      R #BEF.Bef.Frg_LL;
+
+      U #BEF.Bef.Frg_LL;
+      S #MELD.Status.Frg_LL;
+      R #BEF.Bef.Frg_LL;
+
+//Störungsbehandlung ein-/ausschalten
+      U #BEF.Bef.SB_MW_frz;
+      U #MELD.Status.SB_MW_frz;
+      R #MELD.Status.SB_MW_frz;
+      R #BEF.Bef.SB_MW_frz;
+
+      U #BEF.Bef.SB_MW_frz;
+      S #MELD.Status.SB_MW_frz;
+      R #BEF.Bef.SB_MW_frz;
+
+
+      U #BEF.Bef.SB_MW_EW;
+      U #MELD.Status.SB_MW_EW;
+      R #MELD.Status.SB_MW_EW;
+      R #BEF.Bef.SB_MW_EW;
+
+      U #BEF.Bef.SB_MW_EW;
+      S #MELD.Status.SB_MW_EW;
+      R #BEF.Bef.SB_MW_EW;
+
+
+
+NETWORK
+TITLE = Peripheriewert prüfen
+//Peripheriewert im Aussteuerbereich?, sonst darin halten
+//alle Analogeingänge sind 0..20 mA parametriert, Drahtbruchüberwachung hier per Konfig-Bit
+      L 16#6C00;
+      T #Peri_Range;
+      L 16#0;
+      T #Peri_Offs;
+      L 16#ACC;
+      T #Peri_TolRange     ;//2mA Toleranzbereich
+
+
+      U #PRM.Konfig.Peri_PT100;
+      SPBN PeriKonfPT100;
+
+      L 2000;
+      T #Peri_Range;
+
+PeriKonfPT100:      U #PRM.Konfig.Peri;
+      U #PRM.Konfig.Peri_4_20mA;
+      SPBN PeriKonfmA;
+
+      L 16#5667;
+      T #Peri_Range;
+      L 16#1599;
+      T #Peri_Offs;
+
+PeriKonfmA:      NOP 0;
+      CLR;
+      = #MW_hold;
+
+      L W#16#6C00;
+      L #Peri_TolRange;
+      +I;
+      L #EA.EW_Peri;
+      >I;
+      = #b_tmp;
+
+      L #Peri_Offs;
+      L #Peri_TolRange;
+      -I;
+      L #EA.EW_Peri;
+      <I;
+      U #b_tmp;
+      UN #MELD.Status.BA_Frz;
+      SPB MWok;
+      SET;
+      = #MW_hold;
+      L #MW_Peri_last_valid;
+MWok:      T #MW_Peri_last_valid;
+
+//bei Übernahme von Messsystem (WTW oder andere mit Vorverarbeitung) dessen Messwertstatus auswerten
+      U #EA.E.St;
+      O #EA.E.Wt;
+      O #EA.E.int_St;
+      O #EA.E.MW_OF_St;
+      O #EA.E.MW_inv_St;
+      U #PRM.Konfig.PW;
+      S #MW_hold;
+      L #MW_Peri_PW_last_valid;
+      SPB PWnok;
+
+      L #EA.EW_PW;
+PWnok:      T #MW_Peri_PW_last_valid;
+
+NETWORK
+TITLE = Skalierung
+//wenn Wert aus analoger Peripherie, dann Geradengleichung zwischen 0..6C00h und UG..OG
+
+      U #PRM.Konfig.PW;
+      L #MW_Peri_PW_last_valid;
+      SPB MWSkalzw;
+
+      L #MW_Peri_last_valid;
+      L #Peri_Offs;
+      -I;
+      T #i_tmp;
+
+      L #PRM.MW_OG;
+      L #PRM.MW_UG;
+      -R;
+      L #i_tmp;
+      ITD;
+      DTR;
+      *R;
+      L #Peri_Range;
+      ITD;
+      DTR;
+      /R;
+      L #PRM.MW_UG;
+      +R;
+MWSkalzw:      T #MW_Skal_last_valid;
+
+
+NETWORK
+TITLE = Störungserfassung
+
+//Quittierung
+      U #BEF.Bef.BF_Quit;
+      O "Global_Quit";
+      = #ZI_Quit;
+      R #Allg_St;
+      R #mA_St;
+      R #OF_St;
+      R #UF_St;
+      R #Kom_DP_St;
+      R #Kom_int_St;
+      R #int_St;
+      R #MELD.Status.BB_SSnq;
+      R #BEF.Bef.BF_Quit;
+
+//Störungen
+      CLR;
+      = #SS;
+      = #SSnq;
+
+      L #PRM.VZ_St;
+      T #iTime;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #EA.E.St , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_Allg_St , 
+         Q                           := #Allg_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+      L #Peri_Offs;
+      L #Peri_TolRange;
+      -I;
+      L #EA.EW_Peri;
+      >I;
+      = #b_tmp;
+
+      L #EA.EW_Peri;
+      L W#16#7FFF;
+      ==I;
+      O(;
+      L #EA.EW_Peri;
+      L W#16#8000;
+      ==I;
+      );
+      O #b_tmp;
+      = #b_tmp;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_mA_St , 
+         Q                           := #mA_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+      L W#16#6C00;
+      L #Peri_TolRange;
+      +I;
+      L #EA.EW_Peri;
+      <I;
+      = #b_tmp;
+
+      L #EA.EW_Peri;
+      L W#16#7FFF;
+      <I;
+      U #b_tmp;
+      O #EA.E.MW_OF_St;
+      = #b_tmp;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_OF_St , 
+         Q                           := #OF_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+      L #Peri_Offs;
+      L #Peri_TolRange;
+      -I;
+      L #EA.EW_Peri;
+      >I;
+      = #b_tmp;
+
+      L #EA.EW_Peri;
+      L W#16#8000;
+      >I;
+      U #b_tmp;
+      O #EA.E.MW_OF_St;
+      = #b_tmp;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_UF_St , 
+         Q                           := #UF_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #EA.E.Kom_DP , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_Kom_DP_St , 
+         Q                           := #Kom_DP_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #EA.E.Kom_int , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_Kom_int_St , 
+         Q                           := #Kom_int_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+      U #EA.E.int_St;
+      O #EA.E.MW_inv_St;
+      = #b_tmp;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 0 , 
+         Quit                        := #ZI_Quit , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_int_St , 
+         Q                           := #int_St , 
+         SS                          := #SS , 
+         SSnq                        := #SSnq
+      );
+
+
+//Überwachungen
+      L #PRM.VZ_Ex;
+      T #iTime;
+
+      U #PRM.Konfig.GW_Delta;
+      SPB GW_Delta;
+
+      L #MELD.MW_akt;
+      L #PRM.GW_HH;
+      >=R;
+      U #MELD.Status.Frg_HH;
+      UN #MELD.Status.GW_Sp_H;
+      = #b_tmp;
+
+      L #MELD.MW_akt;
+      L #PRM.GW_Hyst;
+      +R;
+      L #PRM.GW_HH;
+      <=R;
+      ON #MELD.Status.Frg_HH;
+      R #GW_HH;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 1 , 
+         Quit                        := 0 , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_HH , 
+         Q                           := #GW_HH , 
+         SS                          := #b_tmp , 
+         SSnq                        := #b_tmp
+      );
+
+
+      L #MELD.MW_akt;
+      L #PRM.GW_H;
+      >=R;
+      U #MELD.Status.Frg_H;
+      UN #MELD.Status.GW_Sp_H;
+      = #b_tmp;
+
+      L #MELD.MW_akt;
+      L #PRM.GW_Hyst;
+      +R;
+      L #PRM.GW_H;
+      <=R;
+      ON #MELD.Status.Frg_H;
+      R #GW_H;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 1 , 
+         Quit                        := 0 , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_H , 
+         Q                           := #GW_H , 
+         SS                          := #b_tmp , 
+         SSnq                        := #b_tmp
+      );
+
+
+      L #MELD.MW_akt;
+      L #PRM.GW_L;
+      <=R;
+      U #MELD.Status.Frg_L;
+      UN #MELD.Status.GW_Sp_L;
+      = #b_tmp;
+
+      L #MELD.MW_akt;
+      L #PRM.GW_Hyst;
+      -R;
+      L #PRM.GW_L;
+      >=R;
+      ON #MELD.Status.Frg_L;
+      R #GW_L;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 1 , 
+         Quit                        := 0 , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_L , 
+         Q                           := #GW_L , 
+         SS                          := #b_tmp , 
+         SSnq                        := #b_tmp
+      );
+
+
+      L #MELD.MW_akt;
+      L #PRM.GW_LL;
+      <=R;
+      U #MELD.Status.Frg_LL;
+      UN #MELD.Status.GW_Sp_L;
+      = #b_tmp;
+
+      L #MELD.MW_akt;
+      L #PRM.GW_Hyst;
+      -R;
+      L #PRM.GW_LL;
+      >=R;
+      ON #MELD.Status.Frg_LL;
+      R #GW_LL;
+
+      CALL "FC60_TON_St_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         Set_Q                       := 1 , 
+         Quit                        := 0 , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_LL , 
+         Q                           := #GW_LL , 
+         SS                          := #b_tmp , 
+         SSnq                        := #b_tmp
+      );
+
+
+      SPA GW_end;
+
+GW_Delta:      NOP 0;
+
+      L #MELD.MW_akt;
+      L #BEF.MW_Sim;
+      -R;
+      T #MW_GW_chk;
+
+      L #MW_GW_chk;
+      L #PRM.GW_HH;
+      >=R;
+      U #MELD.Status.Frg_HH;
+      UN #MELD.Status.GW_Sp_H;
+      = #b_tmp;
+
+      CALL "FC61_TON_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_HH , 
+         Q                           := #GW_HH
+      );
+
+      L #MW_GW_chk;
+      L #PRM.GW_H;
+      >=R;
+      U #MELD.Status.Frg_H;
+      UN #MELD.Status.GW_Sp_H;
+      = #b_tmp;
+
+      CALL "FC61_TON_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_H , 
+         Q                           := #GW_H
+      );
+
+      L #MW_GW_chk;
+      L -1.0;
+      *R;
+      L #PRM.GW_L;
+      >=R;
+      U #MELD.Status.Frg_L;
+      UN #MELD.Status.GW_Sp_L;
+      = #b_tmp;
+
+      CALL "FC61_TON_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_L , 
+         Q                           := #GW_L
+      );
+
+      L #MW_GW_chk;
+      L -1.0;
+      *R;
+      L #PRM.GW_LL;
+      >=R;
+      U #MELD.Status.Frg_LL;
+      UN #MELD.Status.GW_Sp_L;
+      = #b_tmp;
+
+      CALL "FC61_TON_s"
+      (  enable                      := #b_tmp , 
+         Imp                         := "Imp_Sek_Zyk_MW" , 
+         TmrMax                      := #iTime , 
+         TmrVar                      := #Tmr_GW_LL , 
+         Q                           := #GW_LL
+      );
+
+GW_end:      NOP 0;
+
+//Zusammenfassung
+
+      U #SS;
+      U(;
+      L #Typ;
+      L 0;
+      ==I;
+      );
+      = #MELD.Status.BB_SS;
+      U #SSnq;
+      CLR;
+      = #MELD.Status.BB_SSnq;
+
+      U #Allg_St;
+      = #MELD.Stoerung.St_allg;
+      U #mA_St;
+      U(;
+      L #Typ;
+      L 0;
+      ==I;
+      );
+      = #MELD.Stoerung.St_4mA;
+      U #OF_St;
+      = #MELD.Stoerung.St_OF;
+      U #UF_St;
+      = #MELD.Stoerung.St_UF;
+      U #Kom_DP_St;
+      = #MELD.Stoerung.St_Kom_DP;
+      U #Kom_int_St;
+      = #MELD.Stoerung.St_Kom_int;
+      U #int_St;
+      = #MELD.Stoerung.St_int;
+
+      U #GW_HH;
+      = #MELD.Stoerung.GW_HH;
+      U #GW_H;
+      = #MELD.Stoerung.GW_H;
+      U #GW_L;
+      = #MELD.Stoerung.GW_L;
+      U #GW_LL;
+      = #MELD.Stoerung.GW_LL;
+
+
+
+
+NETWORK
+TITLE = Betriebsart bestimmen
+
+
+      U #Allg_St;
+      O #mA_St;
+      O #Kom_DP_St;
+      O #Kom_int_St;
+      O #int_St;
+      = #MW_nok;
+
+      U #MW_nok;
+      U #MELD.Status.SB_MW_frz;
+      = #BA_Anf_Frz;
+
+      U #MW_nok;
+      U #MELD.Status.SB_MW_EW;
+      = #BA_Anf_EW;
+
+      U #EA.E.Wt;
+      = #BA_Anf_Wart;
+
+      U #BA_VW_PLS_Nrm;
+      U #BA_Anf_Frz;
+      O #BA_VW_PLS_Frz;
+      = #MELD.Status.BA_Frz;
+
+      U #BA_VW_PLS_Nrm;
+      U #BA_Anf_EW;
+      O #BA_VW_PLS_EW;
+      = #MELD.Status.BA_EW;
+      R #MELD.Status.BA_Frz;
+
+      U #BA_Anf_Wart;
+      O #BA_VW_PLS_Wart;
+      = #MELD.Status.BA_Wart;
+      R #MELD.Status.BA_EW;
+      R #MELD.Status.BA_Frz;
+
+      U #BA_VW_PLS_Sim;
+      = #MELD.Status.BA_Sim;
+      R #MELD.Status.BA_Wart;
+      R #MELD.Status.BA_EW;
+      R #MELD.Status.BA_Frz;
+
+      UN #MELD.Status.BA_Sim;
+      UN #MELD.Status.BA_Wart;
+      UN #MELD.Status.BA_EW;
+      UN #MELD.Status.BA_Frz;
+      = #MELD.Status.BA_Nrm;
+
+
+//Wertzuweisung
+
+      L #PRM.MW_EW;
+      U #MELD.Status.BA_EW;
+      SPB MWzw;
+      L #BEF.MW_Sim;
+      U #MELD.Status.BA_Sim;
+      SPB MWzw;
+      L #MW_Skal_last_valid;
+      U #MELD.Status.BA_Frz;
+      SPB MWzw;
+      L #MW_Skal_last_valid;
+      U #MELD.Status.BA_Wart;
+      SPB MWzw;
+      L #MW_Skal_last_valid;
+      UN #MW_nok;
+      SPB MWzw;
+      L 0.0;
+MWzw:      T #MW_akt_nofilt;
+
+NETWORK
+TITLE = Statusmeldungen
+      U #MELD.Status.BA_EW;
+      = #MELD.Status.BM_MW_EW;
+
+      U #MELD.Status.BA_Sim;
+      = #MELD.Status.BM_MW_Sim;
+
+      U #MELD.Status.BA_Frz;
+      O #MW_hold;
+      = #MELD.Status.BM_MW_frz;
+
+      UN #MW_hold;
+      UN #MELD.Status.BA_EW;
+      UN #MELD.Status.BA_Sim;
+      UN #Kom_DP_St;
+      UN #Kom_int_St;
+      = #MELD.Status.BM_MW_ok;
+
+      U #MW_nok;
+      U(;
+      L #Typ;
+      L 0;
+      ==I;
+      );
+      = #MELD.Status.BM_MW_nok;
+
+
+      U #MELD.Status.BA_Nrm;
+      UN #MW_nok;
+      O #MELD.Status.BA_Sim;
+      = #MELD.Status.BB_AutoOk;
+
+
+NETWORK
+TITLE = Mittelung
+
+      UN #MELD.Status.BA_Nrm;
+      O #MW_nok;
+      = #b_tmp;
+
+      CALL #MW_Mittel
+      (  Zeitfenster                 := #PRM.MW_Avg , 
+         Rohwert                     := #MW_akt_nofilt , 
+         Rohwert_nok                 := #b_tmp , 
+         Mittelwert                  := #MELD.MW_akt , 
+         MemDB                       := #MW_MemDB
+      );
+
+
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB3_Automatik_Belebung"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      Tmr_GeblW {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      Req_GeblW { S7_SetPoint := 'True'} : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      T_PT : Time;
+      T_IN : Bool;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = 
+NETWORK
+TITLE = Gebläse
+
+      UN #Tmr_GeblW.Q;
+      = #T_IN;
+
+      UN #T_IN;
+      O "NA_RST";
+      R "NA_RST";
+      S #Req_GeblW;
+
+      L "ZEN_SW".BB_Auto_GeblW_ZZ_SW;
+      L DINT#3600000;
+      *D;
+      T #T_PT;
+
+      CALL #Tmr_GeblW
+      {time_type := 'Time'}
+      (  IN                          := #T_IN , 
+         PT                          := #T_PT
+      );
+
+      L #Tmr_GeblW.ET;
+      L DINT#3600000;
+      /D;
+      T "ZEN_MW".BB_Auto_GeblW_ZZ_IW;
+
+      UN "DB104_Antriebe_Meld".BB_G1.Status.BB_AutoOk;
+      R #Req_GeblW;
+      R "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+
+      UN "DB104_Antriebe_Meld".BB_G2.Status.BB_AutoOk;
+      R #Req_GeblW;
+      S "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      S "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+
+      UN "DB104_Antriebe_Meld".BB_G3.Status.BB_AutoOk;
+      R #Req_GeblW;
+      S "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+
+      CLR;
+
+      UN "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      UN "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      O(;
+      UN "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      UN "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+      );
+      S "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+
+      UN "ZEN_Meld".Biocos1_Auto_Bel_Int;
+      UN "ZEN_Meld".Biocos2_Auto_Bel_Int;
+      U #Req_GeblW;
+      SPBN nGeblW;
+      CLR;
+      = #Req_GeblW;
+
+      U "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      U "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      R "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+      SPB nGeblW;
+
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      U "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      S "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      S "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+      SPB nGeblW;
+
+      SET;
+      S "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      S "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      R "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+
+nGeblW:      NOP 0;
+NETWORK
+TITLE = Schieber und Gebläseansteuerung
+
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      = "DB104_Antriebe_Meld".BB_LS1.Status.BM_Auto1;
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+      = "DB104_Antriebe_Meld".BB_LS2.Status.BM_Auto1;
+
+      UN "DB104_Antriebe_Meld".BB_LS1.Status.BM_Zu;
+      = "DB104_Antriebe_Meld".BB_G1.Status.BFR_Ein1;
+      UN "DB104_Antriebe_Meld".BB_LS2.Status.BM_Zu;
+      = "DB104_Antriebe_Meld".BB_G2.Status.BFR_Ein1;
+
+      UN "DB104_Antriebe_Meld".BB_LS1.Status.BM_Auf;
+      UN "DB104_Antriebe_Meld".BB_LS2.Status.BM_Auf;
+      = "DB104_Antriebe_Meld".BB_G3.Status.BFR_Ein1;
+
+
+      UN "DB104_Antriebe_Meld".BB_LS1.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB_LS1.Status.BM_Auto2;
+      UN "DB104_Antriebe_Meld".BB_LS2.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB_LS2.Status.BM_Auto2;
+
+
+      U "ZEN_Meld".Biocos1_Auto_Bel_Int;
+      U "ZEN_Meld".BB_Auto_GeblW_G1_B1;
+      = "DB104_Antriebe_Meld".BB_G1.Status.BM_Auto1;
+      L "ZEN_MW".Biocos1_Auto_Bel_O2_Reg_IW;
+      SPB G1_SW_zw;
+      L 0.0;
+G1_SW_zw:      T "DB104_Antriebe_Meld".BB_G1.SW_Auto;
+
+      U "ZEN_Meld".Biocos2_Auto_Bel_Int;
+      U "ZEN_Meld".BB_Auto_GeblW_G2_B2;
+      = "DB104_Antriebe_Meld".BB_G2.Status.BM_Auto1;
+      L "ZEN_MW".Biocos2_Auto_Bel_O2_Reg_IW;
+      SPB G2_SW_zw;
+      L 0.0;
+G2_SW_zw:      T "DB104_Antriebe_Meld".BB_G2.SW_Auto;
+
+      U "ZEN_Meld".Biocos1_Auto_Bel_Int;
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      U "DB104_Antriebe_Meld".BB_LS1.Status.BM_Auf;
+      O(;
+      U "ZEN_Meld".Biocos2_Auto_Bel_Int;
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+      U "DB104_Antriebe_Meld".BB_LS2.Status.BM_Auf;
+      );
+      = "DB104_Antriebe_Meld".BB_G3.Status.BM_Auto1;
+
+      U "ZEN_Meld".Biocos1_Auto_Bel_Int;
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B1;
+      U "DB104_Antriebe_Meld".BB_LS1.Status.BM_Auf;
+      L "ZEN_MW".Biocos1_Auto_Bel_O2_Reg_IW;
+      SPB G3_SW_zw;
+      U "ZEN_Meld".Biocos2_Auto_Bel_Int;
+      U "ZEN_Meld".BB_Auto_GeblW_G3_B2;
+      U "DB104_Antriebe_Meld".BB_LS2.Status.BM_Auf;
+      L "ZEN_MW".Biocos2_Auto_Bel_O2_Reg_IW;
+      SPB G3_SW_zw;
+      L 0.0;
+G3_SW_zw:      T "DB104_Antriebe_Meld".BB_G3.SW_Auto;
+
+
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB4_Automatik_Biocos"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      BB1 { S7_SetPoint := 'False'} : "FB10_Sub_Biocos";
+      BB2 : "FB10_Sub_Biocos";
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Biocos 1
+//Rechenwerte PS1
+      L "ZEN_SW".Biocos1_Auto_U_Zt_P1_SW;
+      L "ZEN_SW".Biocos1_Auto_V_Zt_P1_SW;
+      +D;
+      T "ZEN_MW".Biocos1_Auto_A_Zt_P1_SW;
+
+      L "ZEN_SW".Biocos1_Auto_V_Zt_P1_SW;
+      L DINT#60;
+      *D;
+      L "ZEN_SW".Biocos1_Auto_Bel_Vz_P1_SW;
+      -D;
+      L DINT#60;
+      /D;
+      T "ZEN_MW".Biocos1_Auto_Bel_Frg_P1_SW;
+
+//Rechenwerte PS2
+      L "ZEN_SW".Biocos1_Auto_U_Zt_P2_SW;
+      L "ZEN_SW".Biocos1_Auto_V_Zt_P2_SW;
+      +D;
+      T "ZEN_MW".Biocos1_Auto_A_Zt_P2_SW;
+
+      L "ZEN_SW".Biocos1_Auto_V_Zt_P2_SW;
+      L DINT#60;
+      *D;
+      L "ZEN_SW".Biocos1_Auto_Bel_Vz_P2_SW;
+      -D;
+      L DINT#60;
+      /D;
+      T "ZEN_MW".Biocos1_Auto_Bel_Frg_P2_SW;
+
+
+      CALL #BB1
+      (  ptr_PS_SW                   := "ZEN_SW".Biocos1_Auto_Bel_O2_Int_SW , 
+         ptr_PS_IW                   := "ZEN_MW".Biocos1_Auto_U_Zt_Px_IW , 
+         O2_Gehalt                   := "DB114_MW_Meld".BB1_O2.MW_akt , 
+         O2_Gehalt_AutoOk            := "DB114_MW_Meld".BB1_O2.Status.BB_AutoOk , 
+         Auto_Bel_O2_Reg_FW          := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_FW , 
+         Auto_Bel_O2_Reg_GW_max      := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_GW_max , 
+         Auto_Bel_O2_Reg_GW_ein      := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_GW_ein , 
+         Auto_Bel_O2_Reg_SW_max      := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_SW_max , 
+         Auto_Bel_O2_Reg_SW_min      := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_SW_min , 
+         Auto_Bel_O2_Reg_DZ_max      := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_DZ_max , 
+         Auto_Bel_O2_Reg_DZ_min      := "ZEN_SW".Biocos1_Auto_Bel_O2_Reg_DZ_min , 
+         BA_SU_RB                    := "ZEN_Meld".Biocos1_BA_SU_RB , 
+         BA_P1_RB                    := "ZEN_Meld".Biocos1_BA_P1_RB , 
+         BA_P2_RB                    := "ZEN_Meld".Biocos1_BA_P2_RB , 
+         BA_Aus_RB                   := "ZEN_Meld".Biocos1_BA_Aus_RB , 
+         Auto_P1_aktiv               := "ZEN_Meld".Biocos1_Auto_P1_aktiv , 
+         Auto_P2_aktiv               := "ZEN_Meld".Biocos1_Auto_P2_aktiv , 
+         Auto_Bel_O2_Ein_RB          := "ZEN_Meld".Biocos1_Auto_Bel_O2_Ein_RB , 
+         Auto_Bel_O2_Aus_RB          := "ZEN_Meld".Biocos1_Auto_Bel_O2_Aus_RB , 
+         Auto_Bel_O2_St              := "ZEN_Meld".Biocos1_Auto_Bel_O2_St , 
+         Auto_Bel_O2_min             := "ZEN_Meld".Biocos1_Auto_Bel_O2_min , 
+         Auto_UeSS_Menge_Ein_RB      := "ZEN_Meld".Biocos1_Auto_UeSS_Menge_Ein_RB , 
+         Auto_UeSS_Menge_Aus_RB      := "ZEN_Meld".Biocos1_Auto_UeSS_Menge_Aus_RB , 
+         Auto_UeSS_Menge_St          := "ZEN_Meld".Biocos1_Auto_UeSS_Menge_St , 
+         Auto_Bel_Phase              := "ZEN_Meld".Biocos1_Auto_Bel_Phase , 
+         Auto_Bel_Verz               := "ZEN_Meld".Biocos1_Auto_Bel_Verz , 
+         Auto_Bel_Frg                := "ZEN_Meld".Biocos1_Auto_Bel_Frg , 
+         Auto_Bel_Int                := "ZEN_Meld".Biocos1_Auto_Bel_Int , 
+         Auto_UeSS                   := "ZEN_Meld".Biocos1_Auto_UeSS , 
+         Auto_U1                     := "ZEN_Meld".Biocos1_Auto_U1 , 
+         Auto_V1                     := "ZEN_Meld".Biocos1_Auto_V1 , 
+         Auto_A1                     := "ZEN_Meld".Biocos1_Auto_A1 , 
+         Auto_U2                     := "ZEN_Meld".Biocos1_Auto_U2 , 
+         Auto_V2                     := "ZEN_Meld".Biocos1_Auto_V2 , 
+         Auto_A2                     := "ZEN_Meld".Biocos1_Auto_A2 , 
+         Auto_SR1                    := "ZEN_Meld".Biocos1_Auto_SR1 , 
+         Auto_SR2                    := "ZEN_Meld".Biocos1_Auto_SR2 , 
+         Auto_UeSS_Zyk_IW            := "ZEN_MW".Biocos1_Auto_UeSS_Zyk_IW , 
+         Auto_U1_Zt_IW               := "ZEN_MW".Biocos1_Auto_U1_Zt_IW , 
+         Auto_V1_Zt_IW               := "ZEN_MW".Biocos1_Auto_V1_Zt_IW , 
+         Auto_A1_Zt_IW               := "ZEN_MW".Biocos1_Auto_A1_Zt_IW , 
+         Auto_U2_Zt_IW               := "ZEN_MW".Biocos1_Auto_U2_Zt_IW , 
+         Auto_V2_Zt_IW               := "ZEN_MW".Biocos1_Auto_V2_Zt_IW , 
+         Auto_A2_Zt_IW               := "ZEN_MW".Biocos1_Auto_A2_Zt_IW , 
+         Auto_Bel_Vz_IW              := "ZEN_MW".Biocos1_Auto_Bel_Vz_IW , 
+         Auto_Bel_Frg_IW             := "ZEN_MW".Biocos1_Auto_Bel_Frg_IW , 
+         Auto_Bel_Int_IW             := "ZEN_MW".Biocos1_Auto_Bel_Int_IW , 
+         Auto_Bel_Int_Zt_IW          := "ZEN_MW".Biocos1_Auto_Bel_Int_Zt_IW , 
+         Auto_UeSS_Zt_IW             := "ZEN_MW".Biocos1_Auto_UeSS_Zt_IW , 
+         Auto_UeSS_Df_IW             := "ZEN_MW".Biocos1_Auto_UeSS_Df_IW , 
+         Auto_SR1_Zt_IW              := "ZEN_MW".Biocos1_Auto_SR1_Zt_IW , 
+         Auto_SR2_Zt_IW              := "ZEN_MW".Biocos1_Auto_SR2_Zt_IW , 
+         Auto_Bel_O2_Reg_IW          := "ZEN_MW".Biocos1_Auto_Bel_O2_Reg_IW , 
+         BA_O2_Reg_FW_RB             := "ZEN_Meld".Biocos1_BA_O2_Reg_FW_RB , 
+         BA_O2_Reg_Auto_RB           := "ZEN_Meld".Biocos1_BA_O2_Reg_Auto_RB , 
+         Auto_Bel_O2_Reg_St          := "ZEN_Meld".Biocos1_Auto_Bel_O2_Reg_St , 
+         Auto_Bel_O2_Reg_GW_max_AS   := "ZEN_Meld".Biocos1_Auto_Bel_O2_Reg_GW_max , 
+         BA_SU_BF                    := "ZEN_Bef".Biocos1_BA_SU_BF , 
+         BA_P1_BF                    := "ZEN_Bef".Biocos1_BA_P1_BF , 
+         BA_P2_BF                    := "ZEN_Bef".Biocos1_BA_P2_BF , 
+         BA_Aus_BF                   := "ZEN_Bef".Biocos1_BA_Aus_BF , 
+         Auto_Bel_O2_Ein_BF          := "ZEN_Bef".Biocos1_Auto_Bel_O2_Ein_BF , 
+         Auto_Bel_O2_Aus_BF          := "ZEN_Bef".Biocos1_Auto_Bel_O2_Aus_BF , 
+         Auto_UeSS_Menge_Ein_BF      := "ZEN_Bef".Biocos1_Auto_UeSS_Menge_Ein_BF , 
+         Auto_UeSS_Menge_Aus_BF      := "ZEN_Bef".Biocos1_Auto_UeSS_Menge_Aus_BF , 
+         BA_O2_Reg_FW_BF             := "ZEN_Bef".Biocos1_BA_O2_Reg_FW_BF , 
+         BA_O2_Reg_Auto_BF           := "ZEN_Bef".Biocos1_BA_O2_Reg_Auto_BF
+      );
+
+NETWORK
+TITLE = Biocos 1 Ansteuerungen
+
+      U "ZEN_Meld".Biocos1_Auto_U1;
+      U "DB104_Antriebe_Meld".BB1_AS1.Status.BM_Zu;
+      = "DB104_Antriebe_Meld".BB1_RZP1.Status.BM_Auto1;
+      U "ZEN_Meld".Biocos1_Auto_U2;
+      U "DB104_Antriebe_Meld".BB1_AS2.Status.BM_Zu;
+      = "DB104_Antriebe_Meld".BB1_RZP2.Status.BM_Auto1;
+
+      U "ZEN_Meld".Biocos1_Auto_SR1;
+      = "DB104_Antriebe_Meld".BB1_SR1.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB1_SR1.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB1_SR1.Status.BM_Auto2;
+
+      U "ZEN_Meld".Biocos1_Auto_SR2;
+      = "DB104_Antriebe_Meld".BB1_SR2.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB1_SR2.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB1_SR2.Status.BM_Auto2;
+
+      U "ZEN_Meld".Biocos1_Auto_UeSS;
+      = "DB104_Antriebe_Meld".BB1_UeSP.Status.BM_Auto1;
+
+
+      U "ZEN_Meld".Biocos1_Auto_A1;
+      S "DB104_Antriebe_Meld".BB1_AS1.Status.BM_Auto1;
+      UN "ZEN_Meld".Biocos1_Auto_A1;
+      U "DB104_Antriebe_Meld".BB1_AS2.Status.BM_Auf;
+      R "DB104_Antriebe_Meld".BB1_AS1.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB1_AS1.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB1_AS1.Status.BM_Auto2;
+
+      U "ZEN_Meld".Biocos1_Auto_A2;
+      S "DB104_Antriebe_Meld".BB1_AS2.Status.BM_Auto1;
+      UN "ZEN_Meld".Biocos1_Auto_A2;
+      U "DB104_Antriebe_Meld".BB1_AS1.Status.BM_Auf;
+      R "DB104_Antriebe_Meld".BB1_AS2.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB1_AS2.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB1_AS2.Status.BM_Auto2;
+
+
+NETWORK
+TITLE = Biocos 2
+//Rechenwerte PS1
+      L "ZEN_SW".Biocos2_Auto_U_Zt_P1_SW;
+      L "ZEN_SW".Biocos2_Auto_V_Zt_P1_SW;
+      +D;
+      T "ZEN_MW".Biocos2_Auto_A_Zt_P1_SW;
+
+      L "ZEN_SW".Biocos2_Auto_V_Zt_P1_SW;
+      L DINT#60;
+      *D;
+      L "ZEN_SW".Biocos2_Auto_Bel_Vz_P1_SW;
+      -D;
+      L DINT#60;
+      /D;
+      T "ZEN_MW".Biocos2_Auto_Bel_Frg_P1_SW;
+
+//Rechenwerte PS2
+      L "ZEN_SW".Biocos2_Auto_U_Zt_P2_SW;
+      L "ZEN_SW".Biocos2_Auto_V_Zt_P2_SW;
+      +D;
+      T "ZEN_MW".Biocos2_Auto_A_Zt_P2_SW;
+
+      L "ZEN_SW".Biocos2_Auto_V_Zt_P2_SW;
+      L DINT#60;
+      *D;
+      L "ZEN_SW".Biocos2_Auto_Bel_Vz_P2_SW;
+      -D;
+      L DINT#60;
+      /D;
+      T "ZEN_MW".Biocos2_Auto_Bel_Frg_P2_SW;
+
+
+      CALL #BB2
+      (  ptr_PS_SW                   := "ZEN_SW".Biocos2_Auto_Bel_O2_Int_SW , 
+         ptr_PS_IW                   := "ZEN_MW".Biocos2_Auto_U_Zt_Px_IW , 
+         O2_Gehalt                   := "DB114_MW_Meld".BB2_O2.MW_akt , 
+         O2_Gehalt_AutoOk            := "DB114_MW_Meld".BB2_O2.Status.BB_AutoOk , 
+         Auto_Bel_O2_Reg_FW          := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_FW , 
+         Auto_Bel_O2_Reg_GW_max      := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_GW_max , 
+         Auto_Bel_O2_Reg_GW_ein      := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_GW_ein , 
+         Auto_Bel_O2_Reg_SW_max      := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_SW_max , 
+         Auto_Bel_O2_Reg_SW_min      := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_SW_min , 
+         Auto_Bel_O2_Reg_DZ_max      := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_DZ_max , 
+         Auto_Bel_O2_Reg_DZ_min      := "ZEN_SW".Biocos2_Auto_Bel_O2_Reg_DZ_min , 
+         BA_SU_RB                    := "ZEN_Meld".Biocos2_BA_SU_RB , 
+         BA_P1_RB                    := "ZEN_Meld".Biocos2_BA_P1_RB , 
+         BA_P2_RB                    := "ZEN_Meld".Biocos2_BA_P2_RB , 
+         BA_Aus_RB                   := "ZEN_Meld".Biocos2_BA_Aus_RB , 
+         Auto_P1_aktiv               := "ZEN_Meld".Biocos2_Auto_P1_aktiv , 
+         Auto_P2_aktiv               := "ZEN_Meld".Biocos2_Auto_P2_aktiv , 
+         Auto_Bel_O2_Ein_RB          := "ZEN_Meld".Biocos2_Auto_Bel_O2_Ein_RB , 
+         Auto_Bel_O2_Aus_RB          := "ZEN_Meld".Biocos2_Auto_Bel_O2_Aus_RB , 
+         Auto_Bel_O2_St              := "ZEN_Meld".Biocos2_Auto_Bel_O2_St , 
+         Auto_Bel_O2_min             := "ZEN_Meld".Biocos2_Auto_Bel_O2_min , 
+         Auto_UeSS_Menge_Ein_RB      := "ZEN_Meld".Biocos2_Auto_UeSS_Menge_Ein_RB , 
+         Auto_UeSS_Menge_Aus_RB      := "ZEN_Meld".Biocos2_Auto_UeSS_Menge_Aus_RB , 
+         Auto_UeSS_Menge_St          := "ZEN_Meld".Biocos2_Auto_UeSS_Menge_St , 
+         Auto_Bel_Phase              := "ZEN_Meld".Biocos2_Auto_Bel_Phase , 
+         Auto_Bel_Verz               := "ZEN_Meld".Biocos2_Auto_Bel_Verz , 
+         Auto_Bel_Frg                := "ZEN_Meld".Biocos2_Auto_Bel_Frg , 
+         Auto_Bel_Int                := "ZEN_Meld".Biocos2_Auto_Bel_Int , 
+         Auto_UeSS                   := "ZEN_Meld".Biocos2_Auto_UeSS , 
+         Auto_U1                     := "ZEN_Meld".Biocos2_Auto_U1 , 
+         Auto_V1                     := "ZEN_Meld".Biocos2_Auto_V1 , 
+         Auto_A1                     := "ZEN_Meld".Biocos2_Auto_A1 , 
+         Auto_U2                     := "ZEN_Meld".Biocos2_Auto_U2 , 
+         Auto_V2                     := "ZEN_Meld".Biocos2_Auto_V2 , 
+         Auto_A2                     := "ZEN_Meld".Biocos2_Auto_A2 , 
+         Auto_SR1                    := "ZEN_Meld".Biocos2_Auto_SR1 , 
+         Auto_SR2                    := "ZEN_Meld".Biocos2_Auto_SR2 , 
+         Auto_UeSS_Zyk_IW            := "ZEN_MW".Biocos2_Auto_UeSS_Zyk_IW , 
+         Auto_U1_Zt_IW               := "ZEN_MW".Biocos2_Auto_U1_Zt_IW , 
+         Auto_V1_Zt_IW               := "ZEN_MW".Biocos2_Auto_V1_Zt_IW , 
+         Auto_A1_Zt_IW               := "ZEN_MW".Biocos2_Auto_A1_Zt_IW , 
+         Auto_U2_Zt_IW               := "ZEN_MW".Biocos2_Auto_U2_Zt_IW , 
+         Auto_V2_Zt_IW               := "ZEN_MW".Biocos2_Auto_V2_Zt_IW , 
+         Auto_A2_Zt_IW               := "ZEN_MW".Biocos2_Auto_A2_Zt_IW , 
+         Auto_Bel_Vz_IW              := "ZEN_MW".Biocos2_Auto_Bel_Vz_IW , 
+         Auto_Bel_Frg_IW             := "ZEN_MW".Biocos2_Auto_Bel_Frg_IW , 
+         Auto_Bel_Int_IW             := "ZEN_MW".Biocos2_Auto_Bel_Int_IW , 
+         Auto_Bel_Int_Zt_IW          := "ZEN_MW".Biocos2_Auto_Bel_Int_Zt_IW , 
+         Auto_UeSS_Zt_IW             := "ZEN_MW".Biocos2_Auto_UeSS_Zt_IW , 
+         Auto_UeSS_Df_IW             := "ZEN_MW".Biocos2_Auto_UeSS_Df_IW , 
+         Auto_SR1_Zt_IW              := "ZEN_MW".Biocos2_Auto_SR1_Zt_IW , 
+         Auto_SR2_Zt_IW              := "ZEN_MW".Biocos2_Auto_SR2_Zt_IW , 
+         Auto_Bel_O2_Reg_IW          := "ZEN_MW".Biocos2_Auto_Bel_O2_Reg_IW , 
+         BA_O2_Reg_FW_RB             := "ZEN_Meld".Biocos2_BA_O2_Reg_FW_RB , 
+         BA_O2_Reg_Auto_RB           := "ZEN_Meld".Biocos2_BA_O2_Reg_Auto_RB , 
+         Auto_Bel_O2_Reg_St          := "ZEN_Meld".Biocos2_Auto_Bel_O2_Reg_GW_max , 
+         Auto_Bel_O2_Reg_GW_max_AS   := "ZEN_Meld".Biocos2_Auto_Bel_O2_Reg_St , 
+         BA_SU_BF                    := "ZEN_Bef".Biocos2_BA_SU_BF , 
+         BA_P1_BF                    := "ZEN_Bef".Biocos2_BA_P1_BF , 
+         BA_P2_BF                    := "ZEN_Bef".Biocos2_BA_P2_BF , 
+         BA_Aus_BF                   := "ZEN_Bef".Biocos2_BA_Aus_BF , 
+         Auto_Bel_O2_Ein_BF          := "ZEN_Bef".Biocos2_Auto_Bel_O2_Ein_BF , 
+         Auto_Bel_O2_Aus_BF          := "ZEN_Bef".Biocos2_Auto_Bel_O2_Aus_BF , 
+         Auto_UeSS_Menge_Ein_BF      := "ZEN_Bef".Biocos2_Auto_UeSS_Menge_Ein_BF , 
+         Auto_UeSS_Menge_Aus_BF      := "ZEN_Bef".Biocos2_Auto_UeSS_Menge_Aus_BF , 
+         BA_O2_Reg_FW_BF             := "ZEN_Bef".Biocos2_BA_O2_Reg_FW_BF , 
+         BA_O2_Reg_Auto_BF           := "ZEN_Bef".Biocos2_BA_O2_Reg_Auto_BF
+      );
+
+NETWORK
+TITLE = Biocos 2 Ansteuerungen
+
+      U "ZEN_Meld".Biocos2_Auto_U1;
+      U "DB104_Antriebe_Meld".BB2_AS1.Status.BM_Zu;
+      = "DB104_Antriebe_Meld".BB2_RZP1.Status.BM_Auto1;
+      U "ZEN_Meld".Biocos2_Auto_U2;
+      U "DB104_Antriebe_Meld".BB2_AS2.Status.BM_Zu;
+      = "DB104_Antriebe_Meld".BB2_RZP2.Status.BM_Auto1;
+
+      U "ZEN_Meld".Biocos2_Auto_SR1;
+      = "DB104_Antriebe_Meld".BB2_SR1.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB2_SR1.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB2_SR1.Status.BM_Auto2;
+
+      U "ZEN_Meld".Biocos2_Auto_SR2;
+      = "DB104_Antriebe_Meld".BB2_SR2.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB2_SR2.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB2_SR2.Status.BM_Auto2;
+
+      U "ZEN_Meld".Biocos2_Auto_UeSS;
+      = "DB104_Antriebe_Meld".BB2_UeSP.Status.BM_Auto1;
+
+
+      U "ZEN_Meld".Biocos2_Auto_A1;
+      S "DB104_Antriebe_Meld".BB2_AS1.Status.BM_Auto1;
+      UN "ZEN_Meld".Biocos2_Auto_A1;
+      U "DB104_Antriebe_Meld".BB2_AS2.Status.BM_Auf;
+      R "DB104_Antriebe_Meld".BB2_AS1.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB2_AS1.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB2_AS1.Status.BM_Auto2;
+
+      U "ZEN_Meld".Biocos2_Auto_A2;
+      S "DB104_Antriebe_Meld".BB2_AS2.Status.BM_Auto1;
+      UN "ZEN_Meld".Biocos2_Auto_A2;
+      U "DB104_Antriebe_Meld".BB2_AS1.Status.BM_Auf;
+      R "DB104_Antriebe_Meld".BB2_AS2.Status.BM_Auto1;
+      UN "DB104_Antriebe_Meld".BB2_AS2.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".BB2_AS2.Status.BM_Auto2;
+
+
+NETWORK
+TITLE = sonstige Ansteuerungen
+
+      U "ZEN_Meld".Biocos1_Auto_SR1;
+      O "ZEN_Meld".Biocos1_Auto_SR2;
+      = "DB104_Antriebe_Meld".BB1_SR_K.Status.BM_Auto1;
+      O "ZEN_Meld".Biocos2_Auto_SR1;
+      O "ZEN_Meld".Biocos2_Auto_SR2;
+      = "DB104_Antriebe_Meld".BB2_SR_K.Status.BM_Auto1;
+
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB5_Automatik_Zulauf_Ablauf"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      TW_VW_P1 : Bool;
+      FM_TW_1P_Ein : Bool;
+      FM_Besch_Start : Bool;
+      Besch_Startwert : DInt;
+      Tmr_Besch_max {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      Tmr_RA_Stillst {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+   END_VAR
+
+   VAR_TEMP
+      TW_Frg_Zt_Tageswechsel : Bool;
+      TW_Frg_Zt_Tageswechsel_2 : Bool;
+      TW_Frg_Zt_1 : Bool;
+      TW_Frg_Zt_2 : Bool;
+      T_IN : Bool;
+      T_PT : Time;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Trübwasserpumpwerk
+
+//Betriebsart
+      U "ZEN_Bef".Schlamm_TW_BA_Aus_BF;
+      S "ZEN_Meld".Schlamm_TW_BA_Aus_RB;
+      U "ZEN_Bef".Schlamm_TW_BA_Auto_BF;
+      R "ZEN_Meld".Schlamm_TW_BA_Aus_RB;
+
+      UN "ZEN_Meld".Schlamm_TW_BA_Aus_RB;
+      = "ZEN_Meld".Schlamm_TW_BA_Auto_RB;
+
+      CLR;
+      = "ZEN_Bef".Schlamm_TW_BA_Auto_BF;
+      = "ZEN_Bef".Schlamm_TW_BA_Aus_BF;
+
+//Zeitbereich 2 aktivieren / deaktivieren
+      U "ZEN_Bef".Schlamm_TW_Auto_Frg_Zt2_Ein_BF;
+      S "ZEN_Meld".Schlamm_TW_Auto_Frg_Zt2_aktiv_RB;
+      U "ZEN_Bef".Schlamm_TW_Auto_Frg_Zt2_Aus_BF;
+      R "ZEN_Meld".Schlamm_TW_Auto_Frg_Zt2_aktiv_RB;
+
+      CLR;
+      = "ZEN_Bef".Schlamm_TW_Auto_Frg_Zt2_Ein_BF;
+      = "ZEN_Bef".Schlamm_TW_Auto_Frg_Zt2_Aus_BF;
+
+//Freigabe Abzug
+
+//..Zeitbereich 1
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Ein_SW;
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Aus_SW;
+      >=I;
+      = #TW_Frg_Zt_Tageswechsel;
+
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Ein_SW;
+      >=I;
+      U(;
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Aus_SW;
+      <I;
+      );
+      UN #TW_Frg_Zt_Tageswechsel;
+      O(;
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Ein_SW;
+      >=I;
+      O(;
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Aus_SW;
+      <I;
+      );
+      U #TW_Frg_Zt_Tageswechsel;
+      );
+      = #TW_Frg_Zt_1;
+
+//..Zeitbereich 2
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Ein_SW_2;
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Aus_SW_2;
+      >=I;
+      = #TW_Frg_Zt_Tageswechsel_2;
+
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Ein_SW_2;
+      >=I;
+      U(;
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Aus_SW_2;
+      <I;
+      );
+      UN #TW_Frg_Zt_Tageswechsel_2;
+      O(;
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Ein_SW_2;
+      >=I;
+      O(;
+      L "akt_Std";
+      L "ZEN_SW".Schlamm_TW_Auto_Frg_Zt_Aus_SW_2;
+      <I;
+      );
+      U #TW_Frg_Zt_Tageswechsel_2;
+      );
+      = #TW_Frg_Zt_2;
+
+//..Freigabe = Zeitbereich 1 ODER (Zeitbereich 2 UND Zeitbereich 2 aktiv)
+      U #TW_Frg_Zt_1;
+      O(;
+      U #TW_Frg_Zt_2;
+      U "ZEN_Meld".Schlamm_TW_Auto_Frg_Zt2_aktiv_RB;
+      );
+      = "ZEN_Meld".Schlamm_TW_Auto_Frg_Zt;
+
+//Steuerung
+
+      L "DB114_MW_Meld".Truebwasser_Niv.MW_akt;
+      L "ZEN_SW".Schlamm_TW_Auto_Niv_1P_Ein_SW;
+      >=R;
+      S "ZEN_Meld".Schlamm_TW_Auto_1P_Ein;
+
+      L "DB114_MW_Meld".Truebwasser_Niv.MW_akt;
+      L "ZEN_SW".Schlamm_TW_Auto_Niv_2P_Ein_SW;
+      >=R;
+      S "ZEN_Meld".Schlamm_TW_Auto_2P_Ein;
+
+      L "DB114_MW_Meld".Truebwasser_Niv.MW_akt;
+      L "ZEN_SW".Schlamm_TW_Auto_Niv_Aus_SW;
+      <=R;
+      ON "DB114_MW_Meld".Truebwasser_Niv.Status.BB_AutoOk;
+      ON "ZEN_Meld".Schlamm_TW_Auto_Frg_Zt;
+      ON "ZEN_Meld".Schlamm_TW_BA_Auto_RB;
+      R "ZEN_Meld".Schlamm_TW_Auto_1P_Ein;
+      R "ZEN_Meld".Schlamm_TW_Auto_2P_Ein;
+
+//..Pumpenvorwahl
+
+      U "ZEN_Meld".Schlamm_TW_Auto_1P_Ein;
+      FP #FM_TW_1P_Ein;
+      SPBN TW_1P_Ein;
+      L "DB104_Antriebe_Meld".Truebwasser_P1.BZ_ges;
+      L "DB104_Antriebe_Meld".Truebwasser_P2.BZ_ges;
+      <=I;
+      = #TW_VW_P1;
+TW_1P_Ein:      NOP 0;
+
+      UN "DB104_Antriebe_Meld".Truebwasser_P1.Status.BB_AutoOk;
+      R #TW_VW_P1;
+      UN "DB104_Antriebe_Meld".Truebwasser_P2.Status.BB_AutoOk;
+      S #TW_VW_P1;
+
+      U "ZEN_Meld".Schlamm_TW_Auto_1P_Ein;
+      U #TW_VW_P1;
+      O "ZEN_Meld".Schlamm_TW_Auto_2P_Ein;
+      = "DB104_Antriebe_Meld".Truebwasser_P1.Status.BM_Auto1;
+
+      U "ZEN_Meld".Schlamm_TW_Auto_1P_Ein;
+      UN #TW_VW_P1;
+      O "ZEN_Meld".Schlamm_TW_Auto_2P_Ein;
+      = "DB104_Antriebe_Meld".Truebwasser_P2.Status.BM_Auto1;
+
+
+
+NETWORK
+TITLE = Beschickung Schlammbeete
+
+
+//Betriebsart
+      U "ZEN_Bef".Schlamm_Besch_BA_Aus_BF;
+      S "ZEN_Meld".Schlamm_Besch_BA_Aus_RB;
+      U "ZEN_Bef".Schlamm_Besch_BA_Auto_BF;
+      R "ZEN_Meld".Schlamm_Besch_BA_Aus_RB;
+
+      UN "ZEN_Meld".Schlamm_Besch_BA_Aus_RB;
+      = "ZEN_Meld".Schlamm_Besch_BA_Auto_RB;
+
+      CLR;
+      = "ZEN_Bef".Schlamm_Besch_BA_Aus_BF;
+      = "ZEN_Bef".Schlamm_Besch_BA_Auto_BF;
+
+//Steuerung
+      U "ZEN_Meld".Schlamm_Besch_BA_Auto_RB;
+      FP #FM_Besch_Start;
+      SPBN Besch_Start;
+      L "ZEN_MW".Schlamm_Besch_DF_ZW;
+      T #Besch_Startwert;
+Besch_Start:      NOP 0;
+
+      L "ZEN_MW".Schlamm_Besch_DF_ZW;
+      L #Besch_Startwert;
+      -D;
+      T "ZEN_MW".Schlamm_Besch_Auto_Menge_IW;
+      L "ZEN_SW".Schlamm_Besch_Auto_Menge_SW;
+      >=D;
+      S "ZEN_Meld".Schlamm_Besch_BA_Aus_RB;
+
+      U "ZEN_Meld".Schlamm_Besch_BA_Auto_RB;
+      = #T_IN;
+      L "ZEN_SW".Schlamm_Besch_Auto_Zt_max_SW;
+      L DINT#60000;
+      *D;
+      T #T_PT;
+
+      CALL #Tmr_Besch_max
+      {time_type := 'Time'}
+      (  IN                          := #T_IN , 
+         PT                          := #T_PT , 
+         Q                           := "ZEN_Meld".Schlamm_Besch_Auto_Zt_max
+      );
+
+
+      U "ZEN_Meld".Schlamm_Besch_BA_Auto_RB;
+      = "DB104_Antriebe_Meld".Schlamm_AS.Status.BM_Auto1;
+
+      UN "DB104_Antriebe_Meld".Schlamm_AS.Status.BM_Auto1;
+      = "DB104_Antriebe_Meld".Schlamm_AS.Status.BM_Auto2;
+
+      U "ZEN_Meld".Schlamm_Besch_BA_Auto_RB;
+      U "DB104_Antriebe_Meld".Schlamm_AS.Status.BM_Auf;
+      = "DB104_Antriebe_Meld".Schlamm_BP.Status.BM_Auto1;
+
+
+NETWORK
+TITLE = Stillstandüberwachung Rechen
+
+      UN "DB104_Antriebe_Meld".Zulauf_RA_SA.Status.BM_Ein;
+      = #T_IN;
+
+      CALL #Tmr_RA_Stillst
+      {time_type := 'Time'}
+      (  IN                          := #T_IN , 
+         PT                          := T#2h , 
+         Q                           := "ZEN_Meld".Zulauf_RA_SA_Stillst
+      );
+
+NETWORK
+TITLE = PO4-Elimination
+//Betriebsart
+
+      U "ZEN_Bef".PO4_Elim_BA_Aus_BF;
+      R "ZEN_Bef".PO4_Elim_BA_Aus_BF;
+      S "ZEN_Meld".PO4_Elim_BA_Aus_RB;
+      R "ZEN_Meld".PO4_Elim_BA_Auto_RB;
+      R "ZEN_Meld".PO4_Elim_BA_Hand_RB;
+
+      U "ZEN_Bef".PO4_Elim_BA_Hand_BF;
+      R "ZEN_Bef".PO4_Elim_BA_Hand_BF;
+      R "ZEN_Meld".PO4_Elim_BA_Aus_RB;
+      R "ZEN_Meld".PO4_Elim_BA_Auto_RB;
+      S "ZEN_Meld".PO4_Elim_BA_Hand_RB;
+
+      U "ZEN_Bef".PO4_Elim_BA_Auto_BF;
+      O(;
+      UN "ZEN_Meld".PO4_Elim_BA_Aus_RB;
+      UN "ZEN_Meld".PO4_Elim_BA_Auto_RB;
+      UN "ZEN_Meld".PO4_Elim_BA_Hand_RB;
+      );
+      R "ZEN_Bef".PO4_Elim_BA_Auto_BF;
+      R "ZEN_Meld".PO4_Elim_BA_Aus_RB;
+      S "ZEN_Meld".PO4_Elim_BA_Auto_RB;
+      R "ZEN_Meld".PO4_Elim_BA_Hand_RB;
+
+
+//Anforderung Dosierpumpe
+      L "DB80_Peri_EA".PO4_HALA_SC.E.DosP_Anf;
+      L 1.0;
+      ==R;
+      = "ZEN_Meld".PO4_Elim_Auto_P_Ein;
+
+      L "ZEN_SW".PO4_Elim_BA_Hand_SW;
+      L 0.0;
+      >R;
+      U "ZEN_Meld".PO4_Elim_BA_Hand_RB;
+      O(;
+      U "ZEN_Meld".PO4_Elim_Auto_P_Ein;
+      U "ZEN_Meld".PO4_Elim_BA_Auto_RB;
+      );
+      = "DB104_Antriebe_Meld".Zulauf_DosP.Status.BM_Auto1;
+
+
+      L "ZEN_SW".PO4_Elim_BA_Hand_SW;
+      U "ZEN_Meld".PO4_Elim_BA_Hand_RB;
+      SPB DPzw;
+      L "DB80_Peri_EA".PO4_HALA_SC.E.DF_Dos_SW;
+      L 0.5;
+      <R;
+      SPB DPau;
+      TAK;
+DPau:      U "ZEN_Meld".PO4_Elim_BA_Auto_RB;
+      SPB DPzw;
+      L 0.0;
+DPzw:      T "DB104_Antriebe_Meld".Zulauf_DosP.SW_Auto;
+
+//Status Dosierpumpe
+      L "DB80_Peri_EA".Zulauf_DosP.E.DosingCapacityReference;
+      T "ZEN_MW".PO4_Elim_DosP_Status_DF_SW;
+      L "DB80_Peri_EA".Zulauf_DosP.E.MeasuredDosingCapacity;
+      T "ZEN_MW".PO4_Elim_DosP_Status_DF_IW;
+      L "DB80_Peri_EA".Zulauf_DosP.E.MeasuredPressure;
+      T "ZEN_MW".PO4_Elim_DosP_Status_Dr_IW;
+      L "DB80_Peri_EA".Zulauf_DosP.E.VolumeTotal;
+      T "ZEN_MW".PO4_Elim_DosP_Status_DF_ZW;
+
+//Reset Fällmengenzähler
+
+      U "ZEN_Bef".PO4_Elim_DF_RST_BF;
+      R "ZEN_Bef".PO4_Elim_DF_RST_BF;
+      S "DB80_Peri_EA".Zulauf_DosP.A.ResetVolumeCounter;
+      U "DB80_Peri_EA".Zulauf_DosP.E.STW.ResetVolumeCounterAck;
+      R "DB80_Peri_EA".Zulauf_DosP.A.ResetVolumeCounter;
+
+//Übergabe Hach-Lange Dosierrechner
+      L "DB114_MW_Meld".Ablauf_DF.MW_akt;
+      T "DB80_Peri_EA".PO4_HALA_SC.A.DF_Zulauf;
+      L "DB114_MW_Meld".Ablauf_PO4.MW_akt;
+      T "DB80_Peri_EA".PO4_HALA_SC.A.PO4_akt;
+      L "ZEN_MW".PO4_Elim_DosP_Status_DF_IW;
+      T "DB80_Peri_EA".PO4_HALA_SC.A.DF_DosM;
+
+      CALL "FC66_GetSM_inDBW"
+      (  pDW                         := "DB80_Peri_EA".PO4_HALA_SC.E.DEV_WARNINGS , 
+         SM                          := "ZEN_Meld".PO4_Elim_SC_Status_W1
+      );
+
+      CALL "FC66_GetSM_inDBW"
+      (  pDW                         := "DB80_Peri_EA".PO4_HALA_SC.E.DEV_WARNINGS_II , 
+         SM                          := "ZEN_Meld".PO4_Elim_SC_Status_W2
+      );
+
+      CALL "FC66_GetSM_inDBW"
+      (  pDW                         := "DB80_Peri_EA".PO4_HALA_SC.E.DEV_ERRORS , 
+         SM                          := "ZEN_Meld".PO4_Elim_SC_Status_DevE
+      );
+
+      CALL "FC66_GetSM_inDBW"
+      (  pDW                         := "DB80_Peri_EA".PO4_HALA_SC.E.CLASS_ERROR , 
+         SM                          := "ZEN_Meld".PO4_Elim_SC_Status_CE
+      );
+
+
+NETWORK
+TITLE = 
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB6_Kommunikation"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      MAi_SC_DC_RC_pDB : "MAi_SC_DC_RC_pDB";
+      SLi_SP_DP_s128 : "SLi_SP_DP_s128";
+      SLi_ME_ABC_s32_1 : "SLi_ME_ABC_s32";
+      SLi_IT_s8_1 : "SLi_IT_s8";
+   END_VAR
+
+   VAR_TEMP 
+      retval : Word;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = 
+NETWORK
+TITLE = IEC Config
+      U "ZEN_Bef".ZEN_IEC_RST_BF;
+      R "ZEN_Bef".ZEN_IEC_RST_BF;
+      = "DB_IEC_Config".Prm_Line.doRestart;
+
+
+      CALL "S7_IEC_104_MS_CPU_PN", "S7_IEC_104_MS_CPU_PN_DB"
+      (  Registration_Code           := "DB_IEC_Config".Prm_Line.Reg_Code , 
+         L1_InterfaceID_C1           := 72 , 
+         L1_IP_Address_HH_C1         := 192 , 
+         L1_IP_Address_HL_C1         := 168 , 
+         L1_IP_Address_LH_C1         := 2 , 
+         L1_IP_Address_LL_C1         := 100 , 
+         L1_TCP_Port_Number_C1       := 2404 , 
+         Do_Restart                  := "DB_IEC_Config".Prm_Line.doRestart , 
+         P_Application               := "DB_IEC_Config".Prm_Line.P_App , 
+         L2_Error_Link               := "DB_IEC_Config".Prm_Line.L2_Err , 
+         Con_Err_C1                  := "DB_IEC_Config".Prm_Line.C1_Con_Err , 
+         Con_Err_C2                  := "DB_IEC_Config".Prm_Line.C2_Con_Err , 
+         C1_isActive                 := "DB_IEC_Config".Prm_Line.C1_active , 
+         C2_isActive                 := "DB_IEC_Config".Prm_Line.C2_active , 
+         FB_RetVal                   := "DB_IEC_Config".Prm_Line.FB_Retval , 
+         Buffer_Info_lost            := "DB_IEC_Config".Prm_Line.Buffer_lost , 
+         Time_DS                     := "DB_IEC_Config".Prm_Line.Time_DS , 
+         Time_IV                     := "DB_IEC_Config".Prm_Line.Time_IV , 
+         Time_SY                     := "DB_IEC_Config".Prm_Line.Time_SY , 
+         Time_Diff                   := "DB_IEC_Config".Prm_Line.Time_Diff
+      );
+
+
+      CALL "SL_Org_Asdu_1", "IDB_SL_Org_ASDU_1"
+      (  Comp_ID                     := "DB_IEC_Config".Prm_ASDU[1].Comp_ID , 
+         P_Application               := "DB_IEC_Config".Prm_Line.P_App , 
+         ASDU_Adr                    := "DB_IEC_Config".Prm_ASDU[1].ASDU_Adr , 
+         Accept_ClockSync            := "DB_IEC_Config".Prm_ASDU[1].AcceptCSyn , 
+         Sim_GI                      := "DB_IEC_Config".Prm_ASDU[1].Sim_GI , 
+         SF_Originator               := "DB_IEC_Config".Prm_ASDU[1].SF_Orig , 
+         P_SLi                       := "DB_IEC_Config".Prm_ASDU[1].P_ASDU , 
+         Reset                       := "DB_IEC_Config".Prm_ASDU[1].Reset , 
+         TimeSync                    := "DB_IEC_Config".Prm_ASDU[1].CSyn , 
+         GI_Runs                     := "DB_IEC_Config".Prm_ASDU[1].GI_akt
+      );
+
+      CALL "MA_Org_Asdu_n", "IDB_MA_Org_ASDU_1"
+      (  Comp_ID                     := "DB_IEC_Config".Prm_ASDU[2].Comp_ID , 
+         P_Application               := "DB_IEC_Config".Prm_Line.P_App , 
+         ASDU_Adr                    := DINT#100000401 , //DB401 mit ASDU-Para
+         Start_IC                    := "DB_IEC_Config".Prm_ASDU[2].Start_CI
+      );
+
+
+
+
+NETWORK
+TITLE = Master/Zentralenfunktion
+
+//Einzelmeldungen TK30
+
+      CALL "MAo_SP_IM_pDB"
+      (  Comp_ID                     := 1 , 
+         P_Application               := "DB_IEC_Config".Prm_Line.P_App , 
+         DB_No_Para_SP               := 403 , 
+         FC_RetVal                   := #retval
+      );
+
+//Messwerte TK34
+      CALL "MAo_ME_NA_IM_pDB"
+      (  Comp_ID                     := 2 , 
+         P_Application               := "DB_IEC_Config".Prm_Line.P_App , 
+         DB_No_Para_ME               := 404 , 
+         FC_RetVal                   := #retval
+      );
+
+//Einzelbefehle TK45
+      CALL #MAi_SC_DC_RC_pDB
+      (  Comp_ID                     := 3 , 
+         P_Application               := "DB_IEC_Config".Prm_Line.P_App , 
+         Para_DB                     := 405
+      );
+
+
+
+NETWORK
+TITLE = Slave/Stationsfunktion
+
+//Einzelmeldungen an Zentrale TK30
+
+      CALL #SLi_SP_DP_s128
+      (  Comp_ID                     := 4 , 
+         P_SLi                       := "DB_IEC_Config".Prm_ASDU[1].P_ASDU , 
+         First_Source_Pos            := "ZEN_Meld".IEC_Meld_LS_001 , 
+         First_IEC_Info_Adr          := 65537 , 
+         Src_Struct_Type             := 0 , 
+         Val_Type                    := 1 , 
+         No_of_Infos                 := 32 , 
+         Time_3_7                    := 0 , 
+         Time_Stamp_spo              := 0 , 
+         Time_Stamp_cyc              := 0 , 
+         Time_Stamp_req              := 0 , 
+         Send_Cyclic_Interval_sec    := 0 , 
+         FB_RetVal                   := #retval
+      );
+
+
+      CALL #SLi_ME_ABC_s32_1
+      (  Comp_ID                     := 4 , 
+         P_SLi                       := "DB_IEC_Config".Prm_ASDU[1].P_ASDU , 
+         First_Source_Pos            := "DB_IEC_MW_Image".Umwelt_WG , 
+         First_IEC_Info_Adr          := 67073 , 
+         Src_Struct_Type             := B#16#2F , 
+         Val_Type                    := 13 , 
+         No_of_Infos                 := 5 , 
+         Background_Scan             := 1 , 
+         Send_Cyclic_Interval_sec    := 15 , 
+         Threshold_Sensivity         := 5 , 
+         FB_RetVal                   := #retval
+      );
+
+
+      CALL #SLi_IT_s8_1
+      (  Comp_ID                     := 4 , 
+         P_SLi                       := "DB_IEC_Config".Prm_ASDU[1].P_ASDU , 
+         First_Source_Pos            := "DB_IEC_MW_Image".Umwelt_RM , 
+         First_IEC_Info_Adr          := 67329 , 
+         Src_Struct_Type             := B#16#2D , 
+         No_of_Infos                 := 1 , 
+         Time_Stamp_spo              := 1 , 
+         Time_Stamp_req              := 1 , 
+         Frz_Cyclic_Interval_sec     := 60 , 
+         FB_RetVal                   := #retval
+      );
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB7_Pumpwerke"
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+   VAR 
+      FW_APW_Oeb_KB { S7_SetPoint := 'False'} : "FB11_Sub_PW";
+      FW_APW_BrR_DM : "FB11_Sub_PW";
+      FW_APW_Oeb_Tu : "FB11_Sub_PW";
+      FW_APW_Oeb_KS : "FB11_Sub_PW";
+      FW_APW_Oeb_PG : "FB11_Sub_PW";
+      FW_APW_Oeb_LW : "FB11_Sub_PW";
+      FW_APW_GeD_WG : "FB11_Sub_PW";
+      FW_APW_GeD_AA : "FB11_Sub_PW";
+      FW_APW_WaD : "FB11_Sub_PW";
+      FW_APW_WeD : "FB11_Sub_PW";
+      FW_APW_NiD : "FB11_Sub_PW";
+      FW_APW_LoS : "FB11_Sub_PW";
+      FW_APW_Oeb_Ge : "FB11_Sub_PW";
+      FW_APW_BuH : "FB11_Sub_PW";
+      FW_APW_BrR_TS : "FB11_Sub_PW";
+      akt_Niv_ZS_AS { S7_SetPoint := 'True'} : Real;
+      PW_all_Frg_Aus : Bool;
+      PW_all_Frg_Ein : Bool;
+      PW_all_Frg_AS_zyk : Bool;
+      PW_all_Frg_ZS_zyk : Bool;
+      PW_all_RM_Frg_Aus : Bool;
+      PW_all_RM_Frg_TeilAus : Bool;
+      PW_all_RM_Frg_Ein : Bool;
+      FM_AS_zyk : Bool;
+      FM_ZS_zyk : Bool;
+      Tmr_AS_zyk {InstructionName := 'TOF_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TOF_TIME;
+      Tmr_ZS_zyk {InstructionName := 'TOF_TIME'; LibVersion := '1.0'} : TOF_TIME;
+   END_VAR
+
+   VAR_TEMP 
+      T_IN : Bool;
+      T_PT : Time;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Steuerung Zulauf/Freigabe Pumpwerke - Automatik - Grenzwert max. Durchflußmenge durch die KA
+
+
+//Überwachung Durchfluss
+      L "DB114_MW_Meld".Zulauf_DF.MW_akt;
+      L "ZEN_SW".Zulauf_PW_Auto_DF_max_SW;
+      >=R;
+      S "ZEN_Meld".Zulauf_PW_Auto_DF_max;
+
+      L "DB114_MW_Meld".Zulauf_DF.MW_akt;
+      L 5.0;
+      +R;
+      L "ZEN_SW".Zulauf_PW_Auto_DF_max_SW;
+      <=R;
+      ON "DB114_MW_Meld".Zulauf_DF.Status.BB_AutoOk;
+      R "ZEN_Meld".Zulauf_PW_Auto_DF_max;
+
+
+//Überwachung Niveau
+
+//...Abschaltung
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_max_SW;
+      >=R;
+      S "ZEN_Meld".Zulauf_PW_Auto_Niv_max;
+
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L 3.0;
+      +R;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_max_SW;
+      <=R;
+      ON "DB114_MW_Meld".Zulauf_Niv.Status.BB_AutoOk;
+      R "ZEN_Meld".Zulauf_PW_Auto_Niv_max;
+
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_AS_SW;
+      >=R;
+      UN "ZEN_Meld".Zulauf_PW_Auto_Niv_max;
+      S "ZEN_Meld".Zulauf_PW_Auto_Niv_AS;
+
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L 3.0;
+      +R;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_AS_SW;
+      <=R;
+      O "ZEN_Meld".Zulauf_PW_Auto_Niv_max;
+      ON "DB114_MW_Meld".Zulauf_Niv.Status.BB_AutoOk;
+      R "ZEN_Meld".Zulauf_PW_Auto_Niv_AS;
+
+//...Zuschaltung
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_min_SW;
+      <=R;
+      S "ZEN_Meld".Zulauf_PW_Auto_Niv_min;
+
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L 3.0;
+      -R;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_min_SW;
+      >=R;
+      ON "DB114_MW_Meld".Zulauf_Niv.Status.BB_AutoOk;
+      R "ZEN_Meld".Zulauf_PW_Auto_Niv_min;
+
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_ZS_SW;
+      <=R;
+      UN "ZEN_Meld".Zulauf_PW_Auto_Niv_min;
+      S "ZEN_Meld".Zulauf_PW_Auto_Niv_ZS;
+
+      L "DB114_MW_Meld".Zulauf_Niv.MW_akt;
+      L 3.0;
+      -R;
+      L "ZEN_SW".Zulauf_PW_Auto_Niv_ZS_SW;
+      >=R;
+      O "ZEN_Meld".Zulauf_PW_Auto_Niv_min;
+      ON "DB114_MW_Meld".Zulauf_Niv.Status.BB_AutoOk;
+      R "ZEN_Meld".Zulauf_PW_Auto_Niv_ZS;
+NETWORK
+TITLE = Betriebsart
+
+      U "ZEN_Bef".Zulauf_PW_BA_Aus_BF;
+      O "ZEN_Bef".Zulauf_PW_BA_EFrg_Aus_BF;
+      O "ZEN_Bef".Zulauf_PW_BA_EFrg_Ein_BF;
+      O "ZEN_Bef".Zulauf_PW_BA_SFrg_Aus_BF;
+      O "ZEN_Bef".Zulauf_PW_BA_SFrg_Ein_BF;
+      S "ZEN_Meld".Zulauf_PW_BA_Aus_RB;
+
+      U "ZEN_Bef".Zulauf_PW_BA_Auto_BF;
+      R "ZEN_Meld".Zulauf_PW_BA_Aus_RB;
+
+      UN "ZEN_Meld".Zulauf_PW_BA_Aus_RB;
+      = "ZEN_Meld".Zulauf_PW_BA_Auto_RB;
+
+      U "ZEN_Meld".Zulauf_PW_BA_Auto_RB;
+      SPBN PW_noAuto;
+
+      U "ZEN_Meld".Zulauf_PW_Auto_Niv_max;
+      = #PW_all_Frg_Aus;
+      U "ZEN_Meld".Zulauf_PW_Auto_Niv_min;
+      = #PW_all_Frg_Ein;
+
+PW_noAuto:      NOP 0;
+//manuelle Zu-/Abschaltung
+      U "ZEN_Bef".Zulauf_PW_BA_SFrg_Aus_BF;
+      S #PW_all_Frg_Aus;
+      R #PW_all_Frg_Ein;
+      U "ZEN_Bef".Zulauf_PW_BA_SFrg_Ein_BF;
+      S #PW_all_Frg_Ein;
+      R #PW_all_Frg_Aus;
+
+      U "ZEN_Bef".Zulauf_PW_BA_Aus_BF;
+      O "ZEN_Bef".Zulauf_PW_BA_EFrg_Aus_BF;
+      O "ZEN_Bef".Zulauf_PW_BA_EFrg_Ein_BF;
+      R #PW_all_Frg_Ein;
+      R #PW_all_Frg_Aus;
+
+//zyklische Abschaltung (Automatik)
+      U "ZEN_Meld".Zulauf_PW_Auto_Niv_AS;
+      U "ZEN_Meld".Zulauf_PW_BA_Auto_RB;
+      UN #Tmr_AS_zyk.Q;
+      O "ZEN_Bef".Zulauf_PW_BA_EFrg_Aus_BF;
+      S #PW_all_Frg_AS_zyk;
+
+
+      U #PW_all_Frg_AS_zyk;
+      L #akt_Niv_ZS_AS;
+      SPBN AS_zyk_zw;
+      L 0.0;
+      UN #FM_AS_zyk;
+      SPB AS_zyk_zw;
+      TAK;
+      L 1.0;
+      +R;
+      L 100.0;
+      >R;
+      R #PW_all_Frg_AS_zyk;
+      SPB AS_zyk_zw;
+      TAK;
+AS_zyk_zw:      T #akt_Niv_ZS_AS;
+
+      U #PW_all_Frg_AS_zyk;
+      = #FM_AS_zyk;
+
+      L "ZEN_SW".Zulauf_PW_Auto_Zyk_SW;
+      L DINT#1000;
+      *D;
+      T #T_PT;
+
+      CALL #Tmr_AS_zyk
+      {time_type := 'Time'}
+      (  IN                          := #PW_all_Frg_AS_zyk , 
+         PT                          := #T_PT
+      );
+
+//zyklische Zuschaltung (Automatik)
+      UN "ZEN_Meld".Zulauf_PW_Auto_Niv_ZS;
+      U "ZEN_Meld".Zulauf_PW_BA_Auto_RB;
+      UN #Tmr_ZS_zyk.Q;
+      O "ZEN_Bef".Zulauf_PW_BA_EFrg_Ein_BF;
+      S #PW_all_Frg_ZS_zyk;
+
+
+      U #PW_all_Frg_ZS_zyk;
+      L #akt_Niv_ZS_AS;
+      SPBN ZS_zyk_zw;
+      L 100.0;
+      UN #FM_ZS_zyk;
+      SPB ZS_zyk_zw;
+      TAK;
+      L 1.0;
+      -R;
+      L -1.0;
+      <R;
+      R #PW_all_Frg_ZS_zyk;
+      SPB ZS_zyk_zw;
+      TAK;
+ZS_zyk_zw:      T #akt_Niv_ZS_AS;
+
+      U #PW_all_Frg_ZS_zyk;
+      = #FM_ZS_zyk;
+
+      L "ZEN_SW".Zulauf_PW_Auto_Zyk_SW;
+      L DINT#1000;
+      *D;
+      T #T_PT;
+
+      CALL #Tmr_ZS_zyk
+      {time_type := 'Time'}
+      (  IN                          := #PW_all_Frg_ZS_zyk , 
+         PT                          := #T_PT
+      );
+
+
+      CLR;
+      = "ZEN_Bef".Zulauf_PW_BA_Aus_BF;
+      = "ZEN_Bef".Zulauf_PW_BA_Auto_BF;
+      = "ZEN_Bef".Zulauf_PW_BA_EFrg_Aus_BF;
+      = "ZEN_Bef".Zulauf_PW_BA_EFrg_Ein_BF;
+      = "ZEN_Bef".Zulauf_PW_BA_SFrg_Aus_BF;
+      = "ZEN_Bef".Zulauf_PW_BA_SFrg_Ein_BF;
+
+NETWORK
+TITLE = Sammelmeldungen
+      SET;
+      = #PW_all_RM_Frg_Aus;
+      = #PW_all_RM_Frg_Ein;
+      R #PW_all_RM_Frg_TeilAus;
+
+NETWORK
+TITLE = Sperre PW extern (andere PW)
+      CALL #FW_APW_Oeb_KB
+      (  Idx                         := 0 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_Oeb_KB , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_Oeb_KB , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_Oeb_KB , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_BrR_DM
+      (  Idx                         := 1 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_BrR_DM , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_BrR_DM , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_BrR_DM , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_Oeb_Tu
+      (  Idx                         := 2 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_Oeb_Tu , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_Oeb_Tu , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_Oeb_Tu , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_Oeb_KS
+      (  Idx                         := 3 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         DF_Skal                     := 20.0 , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_Oeb_KS , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_Oeb_KS , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_Oeb_KS , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      U "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_Betrieb;
+      O "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_Betrieb;
+      = #FW_APW_Oeb_PG.Sperre_ext;
+
+      CALL #FW_APW_Oeb_PG
+      (  Idx                         := 4 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         DF_Skal                     := 30.0 , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_Oeb_PG , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_Oeb_PG , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_Oeb_PG , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_Oeb_LW
+      (  Idx                         := 5 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         Sperre_ext                  := 0 , 
+         DF_Skal                     := 30.0 , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_Oeb_LW , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_Oeb_LW , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_Oeb_LW , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_GeD_WG
+      (  Idx                         := 6 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_GeD_WG , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_GeD_WG , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_GeD_WG , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_GeD_AA
+      (  Idx                         := 7 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_GeD_AA , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_GeD_AA , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_GeD_AA , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      U "DB118_PW_Meld".FW_APW_WaD.Status.FWA_Betrieb;
+      UN #FW_APW_WaD.Sperre_ext;
+      S #FW_APW_WeD.Sperre_ext;
+      S #FW_APW_NiD.Sperre_ext;
+
+      UN "DB118_PW_Meld".FW_APW_WaD.Status.FWA_Betrieb;
+      UN #FW_APW_WaD.Sperre_ext;
+      R #FW_APW_WeD.Sperre_ext;
+      R #FW_APW_NiD.Sperre_ext;
+
+      CALL #FW_APW_WaD
+      (  Idx                         := 8 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_WaD , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_WaD , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_WaD , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      U "DB118_PW_Meld".FW_APW_WeD.Status.FWA_Betrieb;
+      UN #FW_APW_WeD.Sperre_ext;
+      S #FW_APW_WaD.Sperre_ext;
+      S #FW_APW_NiD.Sperre_ext;
+
+      UN "DB118_PW_Meld".FW_APW_WeD.Status.FWA_Betrieb;
+      UN #FW_APW_WeD.Sperre_ext;
+      R #FW_APW_WaD.Sperre_ext;
+      R #FW_APW_NiD.Sperre_ext;
+
+
+      CALL #FW_APW_WeD
+      (  Idx                         := 9 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_WeD , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_WeD , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_WeD , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      U "DB118_PW_Meld".FW_APW_NiD.Status.FWA_Betrieb;
+      UN #FW_APW_NiD.Sperre_ext;
+      S #FW_APW_WeD.Sperre_ext;
+      S #FW_APW_WaD.Sperre_ext;
+
+      UN "DB118_PW_Meld".FW_APW_NiD.Status.FWA_Betrieb;
+      UN #FW_APW_NiD.Sperre_ext;
+      R #FW_APW_WeD.Sperre_ext;
+      R #FW_APW_WaD.Sperre_ext;
+
+      CALL #FW_APW_NiD
+      (  Idx                         := 10 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_NiD , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_NiD , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_NiD , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_LoS
+      (  Idx                         := 11 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_LoS , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_LoS , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_LoS , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_Oeb_Ge
+      (  Idx                         := 12 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         DF_Skal                     := 20.0 , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_Oeb_Ge , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_Oeb_Ge , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_Oeb_Ge , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_BuH
+      (  Idx                         := 13 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_BuH , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_BuH , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_BuH , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+      CALL #FW_APW_BrR_TS
+      (  Idx                         := 14 , 
+         Niv_Frg                     := #akt_Niv_ZS_AS , 
+         Frg_Aus                     := #PW_all_Frg_Aus , 
+         Frg_Ein                     := #PW_all_Frg_Ein , 
+         IEC_Image                   := "DB_IEC_PW_Image".FW_APW_BrR_TS , 
+         PW_Meld                     := "DB118_PW_Meld".FW_APW_BrR_TS , 
+         PW_Bef                      := "DB119_PW_Bef".FW_APW_BrR_TS , 
+         AS_Zyk                      := #PW_all_Frg_AS_zyk , 
+         ZS_Zyk                      := #PW_all_Frg_ZS_zyk , 
+         RM_Frg_Ein                  := #PW_all_RM_Frg_Ein , 
+         RM_Frg_TeilAus              := #PW_all_RM_Frg_TeilAus , 
+         RM_Frg_Aus                  := #PW_all_RM_Frg_Aus
+      );
+
+NETWORK
+TITLE = Steuerung Zulauf/Freigabe Pumpwerke - Status - alle Freigaben
+
+      U #PW_all_RM_Frg_Aus;
+      = "ZEN_Meld".Zulauf_PW_Auto_Frg_Aus;
+      U #PW_all_RM_Frg_TeilAus;
+      UN #PW_all_RM_Frg_Aus;
+      = "ZEN_Meld".Zulauf_PW_Auto_Frg_TeilAus;
+      U #PW_all_RM_Frg_Ein;
+      = "ZEN_Meld".Zulauf_PW_Auto_Frg_Ein;
+
+
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB8_Leitstelle"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_TEMP 
+      BB_G1_SS : Bool;
+      BB_G2_SS : Bool;
+      BB_G3_SS : Bool;
+      retval : Int;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = Sammelmeldung an Leitstelle - Gebläse 1 Störung
+      U "DB104_Antriebe_Meld".BB_G1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB_G1.Stoerung.St_Kom_DP;
+      = #BB_G1_SS;
+      U "DB104_Antriebe_Meld".BB_G2.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB_G2.Stoerung.St_Kom_DP;
+      = #BB_G2_SS;
+      U "DB104_Antriebe_Meld".BB_G3.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB_G3.Stoerung.St_Kom_DP;
+      = #BB_G3_SS;
+
+//Gebläse 1 Störung
+      U #BB_G1_SS;
+      = "ZEN_Meld".IEC_Meld_LS_001;
+//Gebläse 2 Störung
+      U #BB_G2_SS;
+      = "ZEN_Meld".IEC_Meld_LS_002;
+//Gebläse 3 Störung
+      U #BB_G3_SS;
+      = "ZEN_Meld".IEC_Meld_LS_003;
+
+//Belebungsbecken 1 Rezipumpe 1 Störung
+      U "DB104_Antriebe_Meld".BB1_RZP1.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_004;
+
+//Belebungsbecken 1 Rezipumpe 2 Störung
+      U "DB104_Antriebe_Meld".BB1_RZP2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_005;
+
+//Belebungsbecken 1 Überschussschlammpumpe Störung
+      U "DB104_Antriebe_Meld".BB1_UeSP.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_006;
+
+//Belebungsbecken 1 Ablaufschieber Störung
+      U "DB104_Antriebe_Meld".BB1_AS1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB1_AS2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_007;
+
+//Belebungsbecken 1 Schlammrückführung Störung
+      U "DB104_Antriebe_Meld".BB1_SR1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB1_SR2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_008;
+
+//Belebungsbecken 2 Rezipumpe 1 Störung
+      U "DB104_Antriebe_Meld".BB2_RZP1.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_009;
+
+//Belebungsbecken 2 Rezipumpe 2 Störung
+      U "DB104_Antriebe_Meld".BB2_RZP2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_010;
+
+//Belebungsbecken 2 Überschussschlammpumpe Störung
+      U "DB104_Antriebe_Meld".BB2_UeSP.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_011;
+
+//Belebungsbecken 2 Ablaufschieber Störung
+      U "DB104_Antriebe_Meld".BB2_AS1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB2_AS2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_012;
+
+//Belebungsbecken 2 Schlammrückführung Störung
+      U "DB104_Antriebe_Meld".BB2_SR1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB2_SR2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_013;
+
+//Rechenanlage Störung
+      U "DB104_Antriebe_Meld".Zulauf_RA_FP.Status.BB_SS;
+      O "DB104_Antriebe_Meld".Zulauf_RA_SA.Status.BB_SSnq;
+      O "DB104_Antriebe_Meld".Zulauf_RA_HZS.Status.BB_SS;
+      O "DB104_Antriebe_Meld".Zulauf_RA_VKS.Status.BB_SS;
+      O "DB104_Antriebe_Meld".Zulauf_RA_V.Status.BB_SS;
+      O "DB104_Antriebe_Meld".Zulauf_RA_RP.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_014;
+
+//Schlammpumpe Störung
+      U "DB104_Antriebe_Meld".Schlamm_BP.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_015;
+
+//Eindicker Störung
+      CLR;
+      = "ZEN_Meld".IEC_Meld_LS_016;
+
+//Trübwasserpumpe Störung
+      U "DB104_Antriebe_Meld".Truebwasser_P1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".Truebwasser_P2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_017;
+
+//Schlammstapelbehälter Störung
+      U "DB104_Antriebe_Meld".Schlamm_AS.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_018;
+
+//Druckluftkompressor Störung
+      U "DB104_Antriebe_Meld".BB1_SR_K.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB2_SR_K.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_019;
+
+//Zulaufschieber Störung
+      U "DB104_Antriebe_Meld".Zulauf_AS.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_020;
+
+//Luftschieber Störung
+      U "DB104_Antriebe_Meld".BB_LS1.Status.BB_SS;
+      O "DB104_Antriebe_Meld".BB_LS2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_021;
+
+//Filtration Störung
+      CLR;
+      = "ZEN_Meld".IEC_Meld_LS_022;
+//Reserve 23
+      = "ZEN_Meld".IEC_Meld_LS_023;
+//Netzausfall
+      O "ZEN_Meld".E_NSHV_NA;
+      O "ZEN_Meld".SimpleSignalingStatus_BF_Bit00;
+      O "ZEN_Meld".SimpleSignalingStatus_BF_Bit01;
+      = "ZEN_Meld".IEC_Meld_LS_024;
+
+//400VAC/24VDC Sammelstörung
+      U "ZEN_Meld".E_NSHV_SS1_St;
+      O "ZEN_Meld".E_NSHV_SS2_St;
+      O "ZEN_Meld".E_NSHV_N02_AF_St;
+      O "ZEN_Meld".E_NSHV_N03_AF_St;
+      O "ZEN_Meld".E_NSHV_N04_AF_St;
+      O "ZEN_Meld".E_NSHV_LS_Aus;
+      O "ZEN_Meld".E_NSHV_LS_St;
+      = "ZEN_Meld".IEC_Meld_LS_025;
+
+//Mengenmessung Störung
+      U "DB114_MW_Meld".Zulauf_AR_DF.Status.BB_SS;
+      O "DB114_MW_Meld".Ablauf_DF.Status.BB_SS;
+      O "DB114_MW_Meld".Zulauf_DF.Status.BB_SS;
+      O "DB114_MW_Meld".BB_UeSS_DF.Status.BB_SS;
+      O "DB114_MW_Meld".Schlamm_Besch_DF.Status.BB_SS;
+      O "DB114_MW_Meld".Truebwasser_DF.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_026;
+
+//Biologie Sammelstörung
+      U #BB_G1_SS;
+      U #BB_G2_SS;
+      O(;
+      U #BB_G1_SS;
+      U #BB_G3_SS;
+      );
+      O(;
+      U #BB_G2_SS;
+      U #BB_G3_SS;
+      );
+
+      O "ZEN_Meld".E_BB_RT;
+      = "ZEN_Meld".IEC_Meld_LS_027;
+
+//Belebungsbecken 1 Biologie Störung
+      U "DB114_MW_Meld".BB1_O2.Stoerung.GW_LL;
+      O "DB114_MW_Meld".BB1_O2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_028;
+
+//Belebungsbecken 2 Biologie Störung
+      U "DB114_MW_Meld".BB2_O2.Stoerung.GW_LL;
+      O "DB114_MW_Meld".BB2_O2.Status.BB_SS;
+      = "ZEN_Meld".IEC_Meld_LS_029;
+
+//Höhenstände Pumpwerke Störung
+      U "DB118_PW_Meld".FW_APW_Oeb_KB.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_BrR_DM.Status.MW_Niv_St;
+//      O     "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.MW_Niv_St
+      O "DB118_PW_Meld".FW_APW_Oeb_KS.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_Oeb_PG.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_Oeb_LW.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_GeD_WG.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_GeD_AA.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_WaD.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_WeD.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_NiD.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_LoS.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_BuH.Status.MW_Niv_St;
+      O "DB118_PW_Meld".FW_APW_BrR_TS.Status.MW_Niv_St;
+      = "ZEN_Meld".IEC_Meld_LS_030;
+
+//Höhenstände Kläranlage Störung
+      U "DB114_MW_Meld".Zulauf_AR_Niv.Status.BB_SS;
+      O "DB114_MW_Meld".Zulauf_AR_Niv.Stoerung.GW_HH;
+      O "ZEN_Meld".E_Zulauf_AR_HW;
+      O "DB114_MW_Meld".Zulauf_Niv.Status.BB_SS;
+      O "DB114_MW_Meld".Zulauf_Niv.Stoerung.GW_HH;
+      O "DB114_MW_Meld".Truebwasser_Niv.Status.BB_SS;
+      O "DB114_MW_Meld".Truebwasser_Niv.Stoerung.GW_HH;
+      = "ZEN_Meld".IEC_Meld_LS_031;
+
+//Türkontakt/Alarmanlage
+      U "ZEN_Meld".ZEN_ObjS_Alarm;
+      = "ZEN_Meld".IEC_Meld_LS_032;
+
+NETWORK
+TITLE = Messwerte Wetterstation
+
+      L "DB114_MW_Meld".Umwelt_WG.MW_akt;
+      L 0.0;
+      <R;
+      SPB WGzw;
+      TAK;
+WGzw:      T "DB_IEC_MW_Image".Umwelt_WG.Data_TK36;
+      L "DB114_MW_Meld".Umwelt_WR.MW_akt;
+      L 0.0;
+      <R;
+      SPB WRzw;
+      TAK;
+      L 360.0;
+      >R;
+      SPB WRzw;
+      TAK;
+WRzw:      T "DB_IEC_MW_Image".Umwelt_WR.Data_TK36;
+      L "DB114_MW_Meld".Umwelt_LDr.MW_akt;
+      T "DB_IEC_MW_Image".Umwelt_LDr.Data_TK36;
+      L "DB114_MW_Meld".Umwelt_T.MW_akt;
+      T "DB_IEC_MW_Image".Umwelt_T.Data_TK36;
+      L "DB114_MW_Meld".Umwelt_LF.MW_akt;
+      T "DB_IEC_MW_Image".Umwelt_LF.Data_TK36;
+
+      U "DB114_MW_Meld".Umwelt_WG.Status.BB_SS;
+      CLR;
+      = "DB_IEC_MW_Image".Umwelt_WG.IV;
+      U "DB114_MW_Meld".Umwelt_WR.Status.BB_SS;
+      CLR;
+      = "DB_IEC_MW_Image".Umwelt_WR.IV;
+      U "DB114_MW_Meld".Umwelt_LDr.Status.BB_SS;
+      = "DB_IEC_MW_Image".Umwelt_LDr.IV;
+      U "DB114_MW_Meld".Umwelt_T.Status.BB_SS;
+      = "DB_IEC_MW_Image".Umwelt_T.IV;
+      U "DB114_MW_Meld".Umwelt_LF.Status.BB_SS;
+      = "DB_IEC_MW_Image".Umwelt_LF.IV;
+
+      L "ZEN_MW".Umwelt_RM_ZW;
+      RND;
+      T "DB_IEC_MW_Image".Umwelt_RM.Data_TK37;
+
+
+
+
+      CALL RD_LOC_T
+      {date_type := 'Date_And_Time'}
+      (  RET_VAL                     := #retval , 
+         OUT                         := "DB_IEC_MW_Image".Umwelt_RM.TS
+      );
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB9_USV_Kom"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      TSEND_Instance {InstructionName := 'TSEND'; LibVersion := '4.0'} : TSEND;
+      TRCV_Instance {InstructionName := 'TRCV'; LibVersion := '4.0'} : TRCV;
+      USV_MB : "FB78_ModbusOverIP_USV";
+      Send_Req { S7_SetPoint := 'True'} : Bool;
+      Send_Done : Bool;
+      Send_Busy : Bool;
+      Send_Error : Bool;
+      Rec_NDR : Bool;
+      Rec_Busy : Bool;
+      Rec_Error : Bool;
+      cmd_aux1 : Bool;
+      cmd_aux2 : Bool;
+      Send_Status : Word;
+      Rec_Status : Word;
+      Send_Len : UDInt;
+      Rec_Len : UDInt;
+   END_VAR
+
+   VAR_TEMP 
+      retval : Int;
+      tmp_DI : DInt;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = 
+
+
+      CALL #TSEND_Instance
+      {data_type := 'Variant', len_type := 'UDInt', id_type := 'CONN_OUC'}
+      (  REQ                         := #Send_Req , 
+         ID                          := 16#100 , 
+         LEN                         := #Send_Len , 
+         DONE                        := #Send_Done , 
+         BUSY                        := #Send_Busy , 
+         ERROR                       := #Send_Error , 
+         STATUS                      := #Send_Status , 
+         DATA                        := "DB60_USV_ModTCP_SEND".Data
+      );
+
+      CALL #TRCV_Instance
+      {ptr_type := 'Variant', value_type := 'UDInt', id_type := 'CONN_OUC'}
+      (  EN_R                        := 1 , 
+         ID                          := 16#100 , 
+         LEN                         := 0 , 
+         ADHOC                       := 1 , 
+         NDR                         := #Rec_NDR , 
+         BUSY                        := #Rec_Busy , 
+         ERROR                       := #Rec_Error , 
+         STATUS                      := #Rec_Status , 
+         RCVD_LEN                    := #Rec_Len , 
+         DATA                        := "DB59_USV_ModTCP_RCV".Data
+      );
+
+
+      CALL #USV_MB
+      (  Rec_ok                      := #Rec_NDR , 
+         Send_ok                     := #Send_Done , 
+         Rec_Len                     := #Rec_Len , 
+         Send_Req                    := #Send_Req , 
+         Kom_St                      := "ZEN_Meld".UPSStatus_SF_Msg08 , 
+         Send_Len                    := #Send_Len , 
+         Cmd_Aux01                   := #cmd_aux1 , 
+         Cmd_Aux02                   := #cmd_aux2
+      );
+
+NETWORK
+TITLE = Zuweisungen auf Melde-DBs
+
+      CALL "FC41_Modbus2Proc_DI"
+      (  ModReg                      := "DB61_USV_ModTCP_WorkData".REQ02.Reg128 , 
+         Faktor                      := 1.0 , 
+         enable                      := 1 , 
+         Value                       := "ZEN_MW".RunTimeRemaining
+      );
+
+      L "DB61_USV_ModTCP_WorkData".REQ02.Reg130;
+      T #tmp_DI;
+
+      CALL "FC41_Modbus2Proc_DI"
+      (  ModReg                      := #tmp_DI , 
+         Faktor                      := 0.001953125 , 
+         enable                      := 1 , 
+         Value                       := "ZEN_MW".StateOfCharge_Pct
+      );
+
+
+
+//Meldungen
+
+      L "DB61_USV_ModTCP_WorkData".REQ01.Reg000_l;
+      T %DB100.DBW168;
+      L "DB61_USV_ModTCP_WorkData".REQ01.Reg000_h;
+      T %DB100.DBW166;
+      L "DB61_USV_ModTCP_WorkData".REQ01.Reg018;
+      T %DB100.DBW170;
+
+      L "DB61_USV_ModTCP_WorkData".REQ01.Reg019;
+      L 0;
+      <>I;
+      = "ZEN_Meld".UPSStatus_SF_Msg01;
+      L "DB61_USV_ModTCP_WorkData".REQ01.Reg020;
+      L DINT#0;
+      <>D;
+      = "ZEN_Meld".UPSStatus_SF_Msg02;
+      L "DB61_USV_ModTCP_WorkData".REQ01.Reg022;
+      L 0;
+      <>I;
+      = "ZEN_Meld".UPSStatus_SF_Msg03;
+
+
+END_FUNCTION_BLOCK
+
+ORGANIZATION_BLOCK "Pull or plug of modules"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+NETWORK
+TITLE = 
+END_ORGANIZATION_BLOCK
+
+ORGANIZATION_BLOCK "Rack or station failure"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+NETWORK
+TITLE = 
+END_ORGANIZATION_BLOCK
+
+ORGANIZATION_BLOCK "Programming error"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+NETWORK
+TITLE = 
+END_ORGANIZATION_BLOCK
+
+FUNCTION "FC40_Modbus2Proc" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      ModReg : Int;
+      Faktor : Real;
+      enable : Bool;
+   END_VAR
+
+   VAR_IN_OUT 
+      Value : Real;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = 
+      UN #enable;
+      BEB;
+
+      L #ModReg;
+      ITD;
+      DTR;
+      L #Faktor;
+      *R;
+      T #Value;
+
+END_FUNCTION
+

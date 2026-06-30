@@ -1,0 +1,1281 @@
+﻿FUNCTION "FC60_TON_St_s" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      enable : Bool;
+      Imp : Bool;
+      Set_Q : Bool;
+      Quit : Bool;
+      TmrMax : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      TmrVar : Int;
+      Q : Bool;
+      SS : Bool;
+      SSnq : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	IF (#TmrMax = 0 OR #Imp) AND #enable THEN
+	    #TmrVar := #TmrVar + 1;
+	    IF #TmrVar >= #TmrMax THEN
+	        IF NOT #Q THEN
+	            #SSnq := 1;
+	            #Q := 1;
+	        END_IF;
+	        #TmrVar := #TmrMax;
+	    END_IF;
+	END_IF;
+	IF NOT #enable THEN
+	    IF NOT #Set_Q OR #Quit THEN
+	        #Q := 0;
+	    END_IF;
+	    IF NOT #Q THEN
+	        #TmrVar := 0;
+	    END_IF;
+	END_IF;
+	IF #Q THEN
+	    #SS := 1;
+	END_IF;
+	
+END_FUNCTION
+
+FUNCTION "FC61_TON_s" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      enable : Bool;
+      Imp : Bool;
+      TmrMax : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      TmrVar : Int;
+      Q : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	IF (#TmrMax = 0 OR #Imp) AND #enable THEN
+	    #TmrVar := #TmrVar + 1;
+	    IF #TmrVar >= #TmrMax THEN
+	        #Q := 1;
+	        #TmrVar := #TmrMax;
+	    END_IF;
+	END_IF;
+	IF NOT #enable THEN
+	    #TmrVar := 0;
+	    #Q := 0;
+	END_IF;
+	
+	
+END_FUNCTION
+
+FUNCTION "FC62_TOF_s" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      enable : Bool;
+      Imp : Bool;
+      TmrMax : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      TmrVar : Int;
+      Q : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	IF (#TmrMax = 0 OR #Imp) AND NOT #enable THEN
+	    #TmrVar := #TmrVar- 1;
+	    IF #TmrVar<=0 THEN
+	        #Q := 0;
+	        #TmrVar := 0;
+	    END_IF;
+	END_IF;
+	IF  #enable THEN
+	    #TmrVar := #TmrMax;
+	    #Q := 1;
+	END_IF;
+	
+	
+END_FUNCTION
+
+FUNCTION "FC63_DB_Copy" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      DB_src : Int;   // Quell-DB, wenn 0, dann lesen von EBx...
+      DB_src_offs : Int;
+      DB_dest : Int;   // Ziel-DB, wenn 0, dann schreiben in ABx...
+      DB_dest_offs : Int;
+      count : Int;
+   END_VAR
+
+   VAR_TEMP 
+      value : Byte;
+      i : Int;
+      area_in : Byte;
+      area_out : Byte;
+   END_VAR
+
+
+BEGIN
+	
+	IF #DB_src = 0 THEN
+	    #area_in := 16#81;  //Eingänge
+	ELSE
+	    #area_in := 16#84;  //DB
+	END_IF;
+	IF #DB_dest = 0 THEN
+	    #area_out := 16#82;  //Ausgänge
+	ELSE
+	    #area_out := 16#84;  //DB
+	END_IF;
+	FOR #i:= 0 TO #count-1 DO
+	    
+	    #value := PEEK_BYTE(area := #area_in, dbNumber := #DB_src , byteOffset := #DB_src_offs+#i);
+	    POKE(area:=#area_out,dbNumber:=#DB_dest, byteOffset:=#DB_dest_offs+#i, value:=#value);
+	    
+	END_FOR;
+END_FUNCTION
+
+FUNCTION "FC64_DB_Fill" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      DB_src : Int;   // Ziel-DB zum Füllen
+      DB_src_offs : Int;
+      FillVal : Byte;   // Füllwert
+      count : Int;
+   END_VAR
+
+   VAR_TEMP 
+      i : Int;
+   END_VAR
+
+
+BEGIN
+	
+	FOR #i := 0 TO #count - 1 DO
+	    
+	    POKE(area := 16#84,
+	         dbNumber := #DB_src,
+	         byteOffset := #DB_src_offs + #i,
+	         value := #FillVal);
+	    
+	END_FOR;
+END_FUNCTION
+
+FUNCTION "FC65_TON_s_BB" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      enable : Bool;
+      RST : Bool;
+      Tmr_SW : DInt;   // Wert in Minuten
+      SW_IW_fakt : Int;   // Faktor Soll-/Istwert
+   END_VAR
+
+   VAR_OUTPUT 
+      Tmr_IW : DInt;   // Istwert (abgelaufen) in Minuten
+      Tmr_left : DInt;   // Istwert Restzeit
+   END_VAR
+
+   VAR_IN_OUT 
+      TmrVar : Int;   // Zwischenwert in s
+      Q : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      Tmr_SW_s : Int;
+   END_VAR
+
+
+BEGIN
+	
+	#Tmr_SW_s := DINT_TO_INT(#Tmr_SW) * #SW_IW_fakt;
+	IF (#Tmr_SW = 0 OR "Imp_Sek") AND #enable THEN
+	    #TmrVar := #TmrVar + 1;
+	    
+	    IF #TmrVar >= #Tmr_SW_s THEN
+	        #Q := 1;
+	        #TmrVar := #Tmr_SW_s;
+	    END_IF;
+	    
+	END_IF;
+	IF NOT #enable OR #RST THEN
+	    #TmrVar := 0;
+	    #Q := 0;
+	END_IF;
+	
+	#Tmr_IW := INT_TO_DINT(#TmrVar) / INT_TO_DINT(#SW_IW_fakt);
+	#Tmr_left := #Tmr_SW-#Tmr_IW;
+	
+END_FUNCTION
+
+FUNCTION_BLOCK "FB50_Antrieb"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Typ : Int;
+      Idx : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      EA : "T_ANTRIEB_EA";
+      MELD : "T_ANTRIEB_MELD";
+      BEF_UV : "T_ANTRIEB_BEF";
+      BEF_PLS : "T_ANTRIEB_BEF";
+      PRM : "T_ANTRIEB_PRM";
+   END_VAR
+
+   VAR 
+      BA_VW_Hand : Bool;
+      Tmr_VZ_Anlauf_Q : Bool;
+      SS : Bool;
+      SSnq : Bool;
+      SSfq : Bool;
+      nBB : Bool;   // nicht betriebsbereit für Hand/Auto
+      VW_Hand_St1 : Bool;
+      VW_Hand_St2 : Bool;
+      VW_Hand_Stop : Bool;
+      VW_Auto_St1 : Bool;
+      VW_Auto_St2 : Bool;
+      Anst_Req_St1 : Bool;
+      Anst_Req_St2 : Bool;
+      FM_Betrieb_Ein : Bool;
+      FM_Betrieb_Aus : Bool;
+      NLZ_MAZ_St1 : Bool;
+      NLZ_MAZ_St2 : Bool;
+      NLZ_Rev_SS_St1 : Bool;
+      NLZ_Rev_SS_St2 : Bool;
+      Th_St : Bool;   // DE Störung thermisch/allgemein
+      DMA_St : Bool;   // DE Störung Drehmoment Öffnen
+      DMZ_St : Bool;   // DE Störung Drehmoment Schliessen
+      FU_St : Bool;   // DE Störung FU
+      TL_St : Bool;   // DE Störung Trockenlauf
+      UDr_St : Bool;   // DE Störung Unterdruck
+      UeDr_St : Bool;   // DE Störung Überdruck
+      UT_St : Bool;   // DE Störung Übertemperatur
+      Le_St : Bool;   // DE Störung Leckage
+      UeLM_St : Bool;   // DE Störung Überlast mechanisch
+      UeLE_St : Bool;   // DE Störung Überlast elektrisch
+      Kom_DP_St : Bool;   // DE Störung Kommunikation dezentrale Peripherie
+      Kom_int_St : Bool;   // DE Störung Kommunikation intern
+      int_St : Bool;   // DE Störung intern
+      LZ_St : Bool;   // Störung Laufzeit/Endlagenüberwachung
+      BefLZ_St : Bool;   // Störung Soll-/Istüberwachung Befehlsausführung
+      FM_GlobalQuit : Bool;
+      Quit_RST : Bool;
+      Tmr_VZ_Anlauf : Int;
+      Tmr_VZ_ESZ : Int;
+      Tmr_Th_St : Int;   // Verzögerung Störung thermisch/allgemein
+      Tmr_DMA_St : Int;   // Verzögerung Störung Drehmoment Öffnen
+      Tmr_DMZ_St : Int;   // Verzögerung Störung Drehmoment Schliessen
+      Tmr_FU_St : Int;   // Verzögerung Störung FU
+      Tmr_TL_St : Int;   // Verzögerung Störung Trockenlauf
+      Tmr_UDr_St : Int;   // Verzögerung Störung Unterdruck
+      Tmr_UeDr_St : Int;   // Verzögerung Störung Überdruck
+      Tmr_UT_St : Int;   // Verzögerung Störung Übertemperatur
+      Tmr_Le_St : Int;   // Verzögerung Störung Leckage
+      Tmr_UeLM_St : Int;   // Verzögerung Störung Überlast mechanisch
+      Tmr_UeLE_St : Int;   // Verzögerung Störung Überlast elektrisch
+      Tmr_Kom_DP_St : Int;   // Verzögerung Störung Kommunikation dezentrale Peripherie
+      Tmr_Kom_int_St : Int;   // Verzögerung Störung Kommunikation intern
+      Tmr_int_St : Int;   // Verzögerung Störung intern
+      Tmr_LZ_St : Int;   // Störung Laufzeit/Endlagenüberwachung
+      Tmr_BefLZ_St : Int;   // Störung Soll-/Istüberwachung Befehlsausführung
+      Tmr_ASZ_St1 : Int;
+      Tmr_ASZ_St2 : Int;
+      Tmr_Rev_St1 : Int;
+      Tmr_Rev_St2 : Int;
+      BZ_ges_s : Int;   // Zwischenspeicher Betriebszeit ges., Stundenwert
+      Tmr_Quit_RST : Int;
+      BEF_NHV { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : "T_ANTRIEB_BEF";
+   END_VAR
+
+   VAR_TEMP 
+      ZI_Quit : Bool;
+      b_tmp : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	
+	//Bedienort
+	#MELD.Status.Bed_vOrt := #EA.E.Bed_vOrt OR NOT #EA.E.Bed_Fern;
+	#MELD.Status.Bed_UV := #EA.E.Bed_UV AND NOT #MELD.Status.Bed_vOrt;
+	//#MELD.Status.Bed_NHV := 0;
+	#MELD.Status.Bed_PLS := NOT #MELD.Status.Bed_vOrt AND NOT #MELD.Status.Bed_UV AND NOT #MELD.Status.Bed_NHV;
+	
+	//Betriebsart
+	IF (#BEF_UV.Bef.BA_Hand AND #MELD.Status.Bed_UV) OR (#BEF_NHV.Bef.BA_Hand AND #MELD.Status.Bed_NHV) OR (#BEF_PLS.Bef.BA_Hand AND #MELD.Status.Bed_PLS) THEN
+	    #BA_VW_Hand := 1;
+	END_IF;
+	IF (#BEF_UV.Bef.BA_Auto AND #MELD.Status.Bed_UV) OR (#BEF_NHV.Bef.BA_Auto AND #MELD.Status.Bed_NHV) OR (#BEF_PLS.Bef.BA_Auto AND #MELD.Status.Bed_PLS) THEN
+	    #BA_VW_Hand := 0;
+	END_IF;
+	#MELD.Status.BA_Hand := #BA_VW_Hand OR #MELD.Status.Bed_vOrt;
+	#MELD.Status.BA_Auto := NOT #MELD.Status.BA_Hand;
+	
+	//Störungsverarbeitung
+	
+	#ZI_Quit := #BEF_NHV.Bef.BF_Quit OR #BEF_UV.Bef.BF_Quit OR #BEF_PLS.Bef.BF_Quit OR ("Global_Quit" AND NOT #FM_GlobalQuit);
+	#FM_GlobalQuit := "Global_Quit";
+	
+	//Überwachungen
+	"FC61_TON_s"(enable := #MELD.Status.BM_Ein,
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := 3,
+	             TmrVar := #Tmr_VZ_Anlauf,
+	             Q := #Tmr_VZ_Anlauf_Q);
+	
+	"FC61_TON_s"(enable := (#MELD.Status.BM_Ein AND (#PRM.EZ_max > 0)),
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := DINT_TO_INT(#PRM.EZ_max),
+	             TmrVar := #Tmr_VZ_ESZ,
+	             Q := #MELD.Stoerung.Wa_EZ);
+	
+	//externe Störungen
+	
+	#SS := 0;
+	#SSnq := 0;
+	
+	"FC60_TON_St_s"(enable := #EA.E.MS_St OR #EA.E.AF_St OR #EA.E.Th_St OR #EA.E.St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_Th_St,
+	                Q := #Th_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.DMA_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_DMA_St,
+	                Q := #DMA_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.DMZ_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_DMZ_St,
+	                Q := #DMZ_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := ((#EA.E.FU_St OR #EA.E.SA_St) (*AND #Tmr_VZ_Anlauf_Q*)),
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_FU_St,
+	                Q := #FU_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := ((#EA.E.TL_St AND #Tmr_VZ_Anlauf_Q) OR #EA.E.DD_St),
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_TL_St,
+	                Q := #TL_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := (#EA.E.UDr_St AND #Tmr_VZ_Anlauf_Q),
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_UDr_St,
+	                Q := #UDr_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := (#EA.E.UeDr_St AND #Tmr_VZ_Anlauf_Q),
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_UeDr_St,
+	                Q := #UeDr_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.UT_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_UT_St,
+	                Q := #UT_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.Le_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_Le_St,
+	                Q := #Le_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.UeLM_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_UeLM_St,
+	                Q := #UeLM_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.UeLE_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_UeLE_St,
+	                Q := #UeLE_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	//DP-Störungen nur als Abschaltung/nicht bereit behandeln, nicht quittierpflichtig
+	"FC60_TON_St_s"(enable := #EA.E.Kom_DP_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 0,
+	                Quit := #ZI_Quit,
+	                TmrMax := 30,
+	                TmrVar := #Tmr_Kom_DP_St,
+	                Q := #Kom_DP_St,
+	                SS := #b_tmp,
+	                SSnq := #b_tmp);
+	
+	"FC60_TON_St_s"(enable := #EA.E.Kom_int_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_Kom_int_St,
+	                Q := #Kom_int_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := #EA.E.int_St,
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.VZ_St),
+	                TmrVar := #Tmr_int_St,
+	                Q := #int_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	//interne Störungen/Überwachungen
+	
+	"FC60_TON_St_s"(enable := (((NOT #MELD.Status.BM_Auf AND #MELD.Status.BM_Anst1) OR (NOT #MELD.Status.BM_Zu AND #MELD.Status.BM_Anst2)) AND ((#Typ = 4) OR (#Typ = 5)) AND (#PRM.UeZ_Endl > 0) AND NOT #ZI_Quit),
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.UeZ_Endl),
+	                TmrVar := #Tmr_LZ_St,
+	                Q := #LZ_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	"FC60_TON_St_s"(enable := ((NOT #MELD.Status.BM_Ein1 AND #MELD.Status.BM_Anst1) OR (NOT #MELD.Status.BM_Ein2 AND #MELD.Status.BM_Anst2)) AND (#PRM.UeZ_BF > 0),
+	                Imp := "Imp_Sek_Zyk",
+	                Set_Q := 1,
+	                Quit := #ZI_Quit,
+	                TmrMax := DINT_TO_INT(#PRM.UeZ_BF),
+	                TmrVar := #Tmr_BefLZ_St,
+	                Q := #BefLZ_St,
+	                SS := #SS,
+	                SSnq := #SSnq);
+	
+	IF #SS THEN
+	    #MELD.Status.BB_SS := 1;
+	    #SSfq := 0;
+	ELSE
+	    IF NOT #SSfq THEN
+	        #SSfq := 1;
+	    ELSE
+	        IF #ZI_Quit THEN
+	            #MELD.Status.BB_SS := 0;
+	        END_IF;
+	    END_IF;
+	END_IF;
+	IF #SSnq THEN
+	    #MELD.Status.BB_SSnq := 1;
+	ELSE
+	    IF #ZI_Quit THEN
+	        #MELD.Status.BB_SSnq := 0;
+	    END_IF;
+	END_IF;
+	
+	#MELD.Stoerung.St_allg := #Th_St;
+	#MELD.Stoerung.St_DMA := #DMA_St;
+	#MELD.Stoerung.St_DMZ := #DMZ_St;
+	#MELD.Stoerung.St_FU := #FU_St;
+	#MELD.Stoerung.St_TL := #TL_St;
+	#MELD.Stoerung.St_UDr := #UDr_St;
+	#MELD.Stoerung.St_UeDr := #UeDr_St;
+	#MELD.Stoerung.St_UeTemp := #UT_St;
+	#MELD.Stoerung.St_Leck := #Le_St;
+	#MELD.Stoerung.St_UeLM := #UeLM_St;
+	#MELD.Stoerung.St_UeLE := #UeLE_St;
+	#MELD.Stoerung.St_Kom_DP := #Kom_DP_St;
+	#MELD.Stoerung.St_Kom_int := #Kom_int_St;
+	#MELD.Stoerung.St_int := #int_St;
+	#MELD.Stoerung.St_LZ := #LZ_St;
+	#MELD.Stoerung.St_BefLZ := #BefLZ_St;
+	
+	#MELD.Stoerung.Wa_Wart := #EA.E.Wart_Wa;
+	
+	
+	//Betriebszustände
+	#MELD.Status.BM_Ein1 := #EA.E.Ein OR #EA.E.Anst OR (#EA.E.FU AND (#Typ = 6)) OR (#EA.A.Auf AND (NOT #MELD.Status.BM_Auf AND #Typ = 5));
+	#MELD.Status.BM_Ein2 := (#EA.A.Zu AND (NOT #MELD.Status.BM_Zu AND #Typ = 5));
+	//Sonderbehandlung MV -> Eingang EA kommt als Rückmeldung vom Ansteuerschütz, EZ logisch bilden
+	IF #Typ = 7 THEN
+	    #MELD.Status.BM_Auf := #EA.E.Anst;    //Rückmeldung Schütz Ansteuerung
+	    #MELD.Status.BM_Zu := NOT #EA.E.Anst;
+	ELSE
+	    #MELD.Status.BM_Auf := #EA.E.EA;
+	    #MELD.Status.BM_Zu := #EA.E.EZ;
+	END_IF;
+	#MELD.Status.BM_Ein := #MELD.Status.BM_Ein1 OR #MELD.Status.BM_Ein2;
+	IF #Typ = 5 OR #Typ = 7 THEN
+	    #MELD.Status.BM_Anst1 := #MELD.Status.BM_Ein1;
+	    #MELD.Status.BM_Anst2 := #MELD.Status.BM_Ein2;
+	ELSE
+	    #MELD.Status.BM_Anst1 := #EA.A.Ein OR #EA.A.Auf OR (#EA.A.FU AND (#Typ = 6) AND NOT #EA.A.Dir);
+	    #MELD.Status.BM_Anst2 := #EA.A.B2 OR #EA.A.Zu OR (#EA.A.FU AND (#Typ = 6) AND #EA.A.Dir);
+	END_IF;
+	#MELD.Status.BM_Aus := NOT #MELD.Status.BM_Ein AND NOT #MELD.Status.BM_Anst1 AND NOT #MELD.Status.BM_Anst2;
+	
+	//Betriebsbereitschaft
+	#MELD.Status.BB_NA := #EA.E.Aus OR NOT "Freigabe_Verbraucher";
+	#nBB := #MELD.Status.BB_NA OR #MELD.Status.BB_SS OR #MELD.Status.BB_SSnq OR #Kom_DP_St;
+	#MELD.Status.BB_AutoOk := #MELD.Status.BA_Auto AND NOT #nBB;
+	
+	//Betriebsfreigaben/-sperren
+	//Lastmanagement -> eigene AS-Prio ist größer/gleich Vorgabe-Prio -> Abschalten
+	#MELD.Status.BFR_ECS := (#PRM.Prio_ECS >= "LMEVU_PrioAS_res") AND ("LMEVU_PrioAS_res" > 0) AND (#PRM.Prio_ECS > 0);
+	//Abschaltung/Sperre durch Notstrombetrieb -> eigene ES-Prio ist kleiner/gleich Vorgabe-Prio -> Einschalten (oder größer als Vorgabe -> Abschalten)
+	#MELD.Status.BFR_NS := (#PRM.Prio_NS > "LMNS_PrioES_res") AND "Notstrombetrieb" AND (#PRM.Prio_NS > 0);
+	
+	
+	//Anforderung Antrieb
+	//Handbetrieb
+	//
+	IF #VW_Hand_St1 AND #MELD.Status.BM_Auf THEN
+	    #VW_Hand_St1 := 0;
+	END_IF;
+	IF #VW_Hand_St2 AND #MELD.Status.BM_Zu THEN
+	    #VW_Hand_St2 := 0;
+	END_IF;
+	//Stufe 1 - Ein Langsam/Vor/Rechts/Aufwärts/Auf
+	IF (#BEF_UV.Bef.BF_Ein1 AND #MELD.Status.Bed_UV) OR (#BEF_NHV.Bef.BF_Ein1 AND #MELD.Status.Bed_NHV) OR (#BEF_PLS.Bef.BF_Ein1 AND #MELD.Status.Bed_PLS) OR #VW_Auto_St1 THEN
+	    #VW_Hand_St1 := 1;
+	    #VW_Hand_St2 := 0;
+	END_IF;
+	//Stufe 2 - Ein Schnell/Zurück/Links/Abwärts/Zu
+	IF (#BEF_UV.Bef.BF_Ein2 AND #MELD.Status.Bed_UV) OR (#BEF_NHV.Bef.BF_Ein2 AND #MELD.Status.Bed_NHV) OR (#BEF_PLS.Bef.BF_Ein2 AND #MELD.Status.Bed_PLS) OR #VW_Auto_St2 THEN
+	    #VW_Hand_St2 := 1;
+	    #VW_Hand_St1 := 0;
+	END_IF;
+	//Stop
+	#VW_Hand_Stop := (#BEF_UV.Bef.BF_Aus AND #MELD.Status.Bed_UV) OR (#BEF_NHV.Bef.BF_Aus AND #MELD.Status.Bed_NHV) OR (#BEF_PLS.Bef.BF_Aus AND #MELD.Status.Bed_PLS) OR #MELD.Status.Bed_vOrt;
+	
+	IF #nBB OR #VW_Hand_Stop OR NOT #MELD.Status.BA_Hand THEN
+	    #VW_Hand_St1 := 0;
+	    #VW_Hand_St2 := 0;
+	END_IF;
+	
+	//Automatik
+	#VW_Auto_St1 := #MELD.Status.BM_Auto1 AND NOT #MELD.Status.BFR_ECS AND NOT #MELD.Status.BFR_NS AND NOT #MELD.Status.BM_Auf AND #MELD.Status.BB_AutoOk;
+	#VW_Auto_St2 := #MELD.Status.BM_Auto2 AND NOT #MELD.Status.BFR_ECS AND NOT #MELD.Status.BFR_NS AND NOT #MELD.Status.BM_Zu AND #MELD.Status.BB_AutoOk;
+	
+	IF #VW_Auto_St1 AND #VW_Auto_St2 THEN
+	    #VW_Auto_St1 := 0;
+	    #VW_Auto_St2 := 0;
+	END_IF;
+	
+	//Ansteuerungen
+	//Nachlaufzeiten Ansteuerungen -> Sperre Wiederanlauf/Mindestausschaltzeit
+	"FC62_TOF_s"(enable := #MELD.Status.BM_Anst1,
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := DINT_TO_INT(#PRM.AZ_min),
+	             TmrVar := #Tmr_ASZ_St1,
+	             Q := #NLZ_MAZ_St1);
+	
+	"FC62_TOF_s"(enable := #MELD.Status.BM_Anst2,
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := DINT_TO_INT(#PRM.AZ_min),
+	             TmrVar := #Tmr_ASZ_St2,
+	             Q := #NLZ_MAZ_St2);
+	
+	#MELD.Status.BFR_MAZ := (#NLZ_MAZ_St1 AND NOT #MELD.Status.BM_Anst1) OR (#NLZ_MAZ_St2 AND NOT #MELD.Status.BM_Anst2);
+	
+	//Nachlaufzeiten Ansteuerungen -> Sperre Stufenschaltung/Reversierung
+	"FC62_TOF_s"(enable := #MELD.Status.BM_Anst1 AND (#Typ <> 4) AND (#Typ <> 5) AND (#Typ <> 7),
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := DINT_TO_INT(#PRM.AZ_Rev),
+	             TmrVar := #Tmr_Rev_St1,
+	             Q := #NLZ_Rev_SS_St1);
+	
+	"FC62_TOF_s"(enable := #MELD.Status.BM_Anst2 AND (#Typ <> 4) AND (#Typ <> 5) AND (#Typ <> 7),
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := DINT_TO_INT(#PRM.AZ_Rev),
+	             TmrVar := #Tmr_Rev_St2,
+	             Q := #NLZ_Rev_SS_St2);
+	
+	#MELD.Status.BFR_Rev := (#NLZ_Rev_SS_St1 AND NOT #MELD.Status.BM_Anst1) OR (#NLZ_Rev_SS_St2 AND NOT #MELD.Status.BM_Anst2);
+	
+	//Anlaufkaskade berücksichtigen
+	#MELD.Status.BFR_ESK := (#PRM.Prio_NA > 0);
+	IF #MELD.Status.BFR_ESK THEN        //ES-Prio>0 -> Einschaltfolge berücksichtigen, sonst Start sofort möglich
+	    //wenn Stufe geschaltet werden soll, dann warten bis ESK frei oder eigene Prio kleiner als bereits angeforderte
+	    IF (#PRM.Prio_NA = "ESK_Stufe_act") OR #MELD.Status.BM_Anst1 OR #MELD.Status.BM_Anst2 THEN
+	        #MELD.Status.BFR_ESK := 0;
+	    ELSE
+	        IF (("ESK_Stufe_req" = 0) OR (#PRM.Prio_NA <= "ESK_Stufe_req")) AND ("ESK_Stufe_act" = 0) AND (#Anst_Req_St1 OR #Anst_Req_St2) THEN
+	            "ESK_Stufe_req" := DINT_TO_INT(#PRM.Prio_NA);
+	            //Zeitvorgabe, größte Zeit "gewinnt"
+	            IF #PRM.ESV_NA > "ESK_NLZ_Stufe_req" THEN
+	                "ESK_NLZ_Stufe_req" := DINT_TO_INT(#PRM.ESV_NA);
+	            END_IF;
+	        END_IF;
+	    END_IF;
+	END_IF;
+	//Ansteuerung Ausgänge
+	IF (#VW_Hand_St1 OR #VW_Auto_St1) AND NOT #NLZ_MAZ_St1 AND NOT #NLZ_Rev_SS_St2 THEN
+	    #Anst_Req_St1 := 1;
+	END_IF;
+	IF (NOT #VW_Hand_St1 AND NOT #VW_Auto_St1) OR #nBB OR #MELD.Status.BM_Auf THEN
+	    #Anst_Req_St1 := 0;
+	END_IF;
+	#EA.A.Req_extern_B1 := #Anst_Req_St1 AND NOT #MELD.Status.BFR_ESK;
+	IF #Typ = 5 THEN
+	    #EA.A.Auf := #EA.A.Req_extern_B1;
+	    IF (#EA.A.Req_extern_B1) THEN
+	        #EA.A.Zu := 0;
+	    END_IF;
+	ELSIF #Typ = 7 THEN
+	    IF #EA.A.Req_extern_B1 THEN
+	        #EA.A.Auf := 1;
+	    END_IF;
+	    #EA.A.Zu := 0;
+	ELSE
+	    #EA.A.Ein := #EA.A.Req_extern_B1 AND NOT #MELD.Status.BFR_Ein1;
+	    IF #Typ = 6 AND #EA.A.Ein THEN
+	        #EA.A.FU := 1;
+	        #EA.A.Ein := 0;
+	        #EA.A.Dir := 0;
+	    END_IF;
+	END_IF;
+	
+	IF (#VW_Hand_St2 OR #VW_Auto_St2) AND NOT #NLZ_MAZ_St2 AND NOT #NLZ_Rev_SS_St1 THEN
+	    #Anst_Req_St2 := 1;
+	END_IF;
+	IF (NOT #VW_Hand_St2 AND NOT #VW_Auto_St2) OR #nBB OR #MELD.Status.BM_Zu THEN
+	    #Anst_Req_St2 := 0;
+	END_IF;
+	#EA.A.Req_extern_B2 := #Anst_Req_St2 AND NOT #MELD.Status.BFR_ESK;
+	IF #Typ = 5 THEN
+	    #EA.A.Zu := #EA.A.Req_extern_B2;
+	    IF #EA.A.Req_extern_B2 THEN
+	        #EA.A.Auf := 0;
+	    END_IF;
+	    IF NOT #EA.A.Req_extern_B1 AND NOT #EA.A.Req_extern_B2 THEN
+	        #EA.A.Auf := 0;
+	        #EA.A.Zu := 0;
+	    END_IF;
+	ELSIF #Typ = 7 THEN
+	    IF #EA.A.Req_extern_B2 THEN
+	        #EA.A.Auf := 0;
+	    END_IF;
+	ELSE
+	    #EA.A.B2 := #EA.A.Req_extern_B2 AND NOT #MELD.Status.BFR_Ein2;
+	    IF #Typ = 6 AND #EA.A.B2 THEN
+	        #EA.A.FU := 1;
+	        #EA.A.B2 := 0;
+	        #EA.A.Dir := 1;
+	    END_IF;
+	END_IF;
+	IF NOT (#EA.A.Req_extern_B1 OR #EA.A.Req_extern_B2) OR (#MELD.Status.BFR_Ein1 OR #MELD.Status.BFR_Ein2) THEN
+	    #EA.A.FU := 0;
+	END_IF;
+	IF NOT #EA.A.FU THEN
+	    #EA.A.Dir := 0;
+	END_IF;
+	IF NOT #Anst_Req_St1 AND NOT #Anst_Req_St2 THEN
+	    #MELD.Status.BFR_ESK := 0;
+	END_IF;
+	
+	//Meldungen Rückbefehle
+	#MELD.Status.RB_Ein1 := #Anst_Req_St1 OR #EA.E.Ein OR #EA.E.FU OR #EA.E.Anst;
+	#MELD.Status.RB_Ein2 := #Anst_Req_St2;
+	#MELD.Status.RB_Aus := NOT #MELD.Status.RB_Ein1 AND NOT #MELD.Status.RB_Ein2;
+	
+	
+	//Ansteuerungen analog (nur bei FU-Typen)
+	IF #Typ = 6 OR true THEN
+	    
+	    IF #EA.A.Ein OR #EA.A.B2 OR #EA.A.FU THEN
+	        IF #MELD.Status.BA_Auto THEN
+	            #MELD.SW_out := #MELD.SW_Auto;
+	        ELSE
+	            IF #MELD.Status.Bed_UV THEN
+	                #MELD.SW_out := #BEF_UV.SW_Hand;
+	            END_IF;
+	            IF #MELD.Status.Bed_NHV THEN
+	                #MELD.SW_out := #BEF_NHV.SW_Hand;
+	            END_IF;
+	            IF #MELD.Status.Bed_PLS THEN
+	                #MELD.SW_out := #BEF_PLS.SW_Hand;
+	            END_IF;
+	        END_IF;
+	    ELSE
+	        #MELD.SW_out := 0.0;
+	    END_IF;
+	    //Sollwertänderungen von remote übernehmen
+	    IF #MELD.Status.Bed_NHV THEN
+	        #BEF_UV.SW_Hand := #BEF_NHV.SW_Hand;
+	        ;
+	    END_IF;
+	    IF #MELD.Status.Bed_PLS THEN
+	        #BEF_UV.SW_Hand := #BEF_PLS.SW_Hand;
+	        ;
+	    END_IF;
+	END_IF;
+	
+	//#BEF_UV.SW_Hand := #MELD.SW_out;
+	//#BEF_NHV.SW_Hand := #MELD.SW_out;
+	//#BEF_PLS.SW_Hand := #MELD.SW_out;
+	
+	//Betriebsdaten erfassen   
+	IF #MELD.Status.BM_Ein THEN
+	    IF NOT #FM_Betrieb_Ein THEN
+	        #MELD.ESH := #MELD.ESH + 1;
+	        #MELD.BZ_akt := 0;
+	    END_IF;
+	    IF "Imp_Sek_Zyk" THEN
+	        //#BZ_ges_s := #BZ_ges_s + 1;
+	        #MELD.BZ_ges := #MELD.BZ_ges + 1;
+	        #MELD.BZ_akt := #MELD.BZ_akt + 1;
+	    END_IF;
+	    (*
+	    IF #BZ_ges_s >= 3600 THEN
+	        #BZ_ges_s := 0;
+	        #MELD.BZ_ges := #MELD.BZ_ges + 1;
+	    END_IF;
+	    *)
+	    #FM_Betrieb_Ein := 1;
+	ELSE
+	    #FM_Betrieb_Ein := 0;
+	END_IF;
+	
+	
+	
+	IF (#BEF_UV.Bef.BZ_Res AND #MELD.Status.Bed_UV) OR (#BEF_NHV.Bef.BZ_Res AND #MELD.Status.Bed_NHV) OR (#BEF_PLS.Bef.BZ_Res) THEN
+	    #MELD.BZ_ges := 0;
+	    #MELD.ESH := 0;
+	    #BZ_ges_s := 0;
+	END_IF;
+	
+	IF #MELD.Status.BM_Aus THEN
+	    IF NOT #FM_Betrieb_Aus THEN
+	        #MELD.AZ_akt := 0;
+	    END_IF;
+	    IF "Imp_Sek_Zyk" THEN
+	        #MELD.AZ_akt := #MELD.AZ_akt + 1;
+	    END_IF;
+	    #FM_Betrieb_Aus := 1;
+	ELSE
+	    #FM_Betrieb_Aus := 0;
+	END_IF;
+	
+	//Lastmanagement
+	IF 1 THEN
+	    //Befehle löschen
+	    #BEF_UV.Bef.BA_Auto := 0;
+	    #BEF_UV.Bef.BA_Hand := 0;
+	    #BEF_UV.Bef.Bed_UV := 0;
+	    #BEF_UV.Bef.Bed_NHV := 0;
+	    #BEF_UV.Bef.Bed_PLS := 0;
+	    
+	    #BEF_NHV.Bef.BA_Auto := 0;
+	    #BEF_NHV.Bef.BA_Hand := 0;
+	    #BEF_NHV.Bef.Bed_UV := 0;
+	    #BEF_NHV.Bef.Bed_NHV := 0;
+	    #BEF_NHV.Bef.Bed_PLS := 0;
+	    
+	    #BEF_PLS.Bef.BA_Auto := 0;
+	    #BEF_PLS.Bef.BA_Hand := 0;
+	    #BEF_PLS.Bef.Bed_UV := 0;
+	    #BEF_PLS.Bef.Bed_NHV := 0;
+	    #BEF_PLS.Bef.Bed_PLS := 0;
+	    #BEF_PLS.Bef.BF_Set_SW_chg := 0;
+	    
+	    #BEF_UV.Bef.BF_Ein1 := 0;
+	    #BEF_UV.Bef.BF_Ein2 := 0;
+	    #BEF_UV.Bef.BF_Aus := 0;
+	    #BEF_UV.Bef.BZ_Res := 0;
+	    #BEF_UV.Bef.BF_Quit := 0;
+	    
+	    #BEF_NHV.Bef.BF_Ein1 := 0;
+	    #BEF_NHV.Bef.BF_Ein2 := 0;
+	    #BEF_NHV.Bef.BF_Aus := 0;
+	    #BEF_NHV.Bef.BZ_Res := 0;
+	    #BEF_NHV.Bef.BF_Quit := 0;
+	    
+	    #BEF_PLS.Bef.BF_Ein1 := 0;
+	    #BEF_PLS.Bef.BF_Ein2 := 0;
+	    #BEF_PLS.Bef.BF_Aus := 0;
+	    #BEF_PLS.Bef.BZ_Res := 0;
+	    #BEF_PLS.Bef.BF_Quit := 0;
+	    
+	END_IF;
+	IF #ZI_Quit THEN
+	    
+	    #EA.A.Quit_extern := 1;
+	    #EA.A.RST := 1;
+	END_IF;
+	"FC61_TON_s"(enable := #EA.A.RST,
+	             Imp := "Imp_Sek_Zyk",
+	             TmrMax := 2,
+	             TmrVar := #Tmr_Quit_RST,
+	             Q := #Quit_RST);
+	IF #Quit_RST THEN
+	    #EA.A.Quit_extern := 0;
+	    #EA.A.RST := 0;
+	END_IF;
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB51_Time"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      tm_Array_last : Array[0..12] of Byte;
+   END_VAR
+
+   VAR_TEMP 
+      retval : Int;
+   END_VAR
+
+
+BEGIN
+	
+	
+	#retval := RD_LOC_T("DB92_OP_Data".LocTime);
+	
+	#retval :=MOVE_BLK_VARIANT(SRC:=P#DB92.DBX0.0 BYTE 12, COUNT:=12, SRC_INDEX:=0, DEST_INDEX:=0, DEST=>"DB92_OP_Data".tm_Array);
+	
+	"akt_Jahr" := BYTE_TO_INT(IN:="DB92_OP_Data".tm_Array[0])* 256 + BYTE_TO_INT(IN:="DB92_OP_Data".tm_Array[1]);
+	"akt_Mon" := BYTE_TO_INT(IN := "DB92_OP_Data".tm_Array[2]);
+	"akt_Tag" := BYTE_TO_INT(IN := "DB92_OP_Data".tm_Array[3]);
+	"akt_WTag" := BYTE_TO_INT(IN := "DB92_OP_Data".tm_Array[4]);
+	
+	"akt_Std" := BYTE_TO_INT(IN := "DB92_OP_Data".tm_Array[5]);
+	"akt_Min" := BYTE_TO_INT(IN := "DB92_OP_Data".tm_Array[6]);
+	"akt_Sek" := BYTE_TO_INT(IN := "DB92_OP_Data".tm_Array[7]);
+	
+	"akt_Min_Tag" := "akt_Std" * 60 + "akt_Min";
+	
+	"Imp_Jahr" := ("DB92_OP_Data".tm_Array[0] <> #tm_Array_last[0]) OR ("DB92_OP_Data".tm_Array[1] <> #tm_Array_last[1]);
+	"Imp_Monat" := ("DB92_OP_Data".tm_Array[2] <> #tm_Array_last[2]);
+	"Imp_Tag" := ("DB92_OP_Data".tm_Array[3] <> #tm_Array_last[3]);
+	"Imp_Std" := ("DB92_OP_Data".tm_Array[5] <> #tm_Array_last[5]);
+	"Imp_Min" := ("DB92_OP_Data".tm_Array[6] <> #tm_Array_last[6]);
+	"Imp_Sek" := ("DB92_OP_Data".tm_Array[7] <> #tm_Array_last[7]);
+	
+	//#retval := MOVE_BLK(SRC :="OP_Data".tm_Array, COUNT := 12, SRC_INDEX := 0, DEST_INDEX := 0, DEST => #tm_Array_last );
+	MOVE_BLK(IN:="DB92_OP_Data".tm_Array[0],
+	         COUNT:=12,
+	         OUT=>#tm_Array_last[0]);
+	
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB60_OP_Mgr"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Bed_aktiv : Bool;
+      Bed_ID : Int;
+      Bed_Perm : Int;
+   END_VAR
+
+   VAR 
+      CtrlJob_act : Bool;
+      PicNum_AntrSub : Bool;
+      FM_PicNum_AntrSub : Bool;
+      PicNum_PrmSub_Rfrs : Bool;
+      PicNum_AntrSub_Rfrs : Bool;   // Antriebsbild Refresh (Sollwert Hand)
+      MsgQuit_Zyk : Bool;
+      Bed_Perm_last : Int;
+      Tmr_CtrlJob_MaxTime {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      Tmr_CtrlJob_BrkTime {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      Tmr_MsgQuit_Zyk {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      CtrlJob_PicReq : Int;
+      CtrlJob_PermReq : Int;
+      OP_UserChg : Int;
+      Antr_Idx_last : Int;
+      AntrListChk_Idx : Int;
+      SW_Hand_last : Real;
+   END_VAR
+
+   VAR_TEMP 
+      AnzSperr : Bool;
+      Bed_UV : Bool;
+      Antr2OP : Byte;
+      Antr_EA_Bed : Byte;
+      Antr2UV : Int;
+      tmp_word : UInt;
+      dw_Clr : DWord;
+   END_VAR
+
+
+BEGIN
+	
+	//Steuerungsauftragsfach verwalten
+	//Funktion 23 - Benutzer anmelden (Param. 1 = Gruppennummer)
+	//Funktion 24 - Benutzer abmelden
+	//Funktion 51 - Bildanwahl (Param. 1 = Bildnummer)
+	//
+	
+	IF NOT #CtrlJob_act THEN
+	    IF #CtrlJob_PicReq > 0 THEN
+	        "DB92_OP_Data".CtrlJob[1] := INT_TO_WORD(#CtrlJob_PicReq);
+	        "DB92_OP_Data".CtrlJob[2] := 0;
+	        "DB92_OP_Data".CtrlJob[3] := 0;
+	        "DB92_OP_Data".CtrlJob[0] := 51;
+	        #CtrlJob_act := 1;
+	        
+	    ELSIF #CtrlJob_PermReq<>0 THEN
+	        "DB92_OP_Data".CtrlJob[1] := 0;
+	        "DB92_OP_Data".CtrlJob[2] := 0;
+	        "DB92_OP_Data".CtrlJob[3] := 0;
+	        CASE #CtrlJob_PermReq OF
+	            -1: //Abmelden
+	                "DB92_OP_Data".CtrlJob[0] := 24;
+	            1, 2:  //normale Benutzer für Einzel- und Gruppenbedienung
+	                "DB92_OP_Data".CtrlJob[1] := 2;
+	                "DB92_OP_Data".CtrlJob[0] := 23;
+	            3, 4:  //Admin. Benutzer für Parametrierung
+	                "DB92_OP_Data".CtrlJob[1] := 1;
+	                "DB92_OP_Data".CtrlJob[0] := 23;
+	        END_CASE;
+	        #CtrlJob_act := 1;
+	        
+	    END_IF;
+	END_IF;
+	#Tmr_CtrlJob_MaxTime(IN:=#CtrlJob_act,
+	                     PT:=t#4s);
+	IF #Tmr_CtrlJob_MaxTime.Q THEN
+	    "DB92_OP_Data".CtrlJob[0] := 0; //Auftragsnummer
+	END_IF;
+	#Tmr_CtrlJob_BrkTime(IN:=#Tmr_CtrlJob_MaxTime.Q OR (#CtrlJob_act AND "DB92_OP_Data".CtrlJob[0]=0) ,
+	                     PT:=t#1s);
+	IF #Tmr_CtrlJob_BrkTime.Q THEN
+	    #CtrlJob_act := 0;
+	    #CtrlJob_PicReq := 0;
+	    #CtrlJob_PermReq := 0;
+	END_IF;
+	
+	//Benutzerwechsel über ID-Schlüssel oder Notfreigabe/-sperre -> remote An-/Abmeldung starten
+	IF #Bed_Perm <> #Bed_Perm_last AND #CtrlJob_PermReq=0 THEN
+	    IF #Bed_Perm = 0 THEN
+	        #CtrlJob_PermReq := -1;
+	    ELSE
+	        #CtrlJob_PermReq := #Bed_Perm;
+	    END_IF;
+	    #Bed_Perm_last := #Bed_Perm;
+	    "DB92_OP_Data".UserPrio := #Bed_Perm;
+	    IF #Bed_Perm = 0 THEN
+	        "DB92_OP_Data".UserID_BitIdx := 0;
+	    ELSE
+	        "DB92_OP_Data".UserID_BitIdx := SHL(IN := DWORD#1, N := INT_TO_UINT(#Bed_ID - 1));
+	    END_IF;
+	END_IF;
+	//Benutzerwechsel vom OP registrieren -> noch keine weitere Auswertung...
+	IF "DB92_OP_Data".UserChg THEN
+	    #OP_UserChg := #OP_UserChg + 1;
+	    "DB92_OP_Data".UserChg := 0;
+	END_IF;
+	
+	//Bildanforderungen
+	//Antriebsmenü -> je nach UV wird zuerst Menü angezeigt mit lokalen Antrieben
+	//UV NHV (0) -> Bild 10
+	//UV REG (1) -> Bild 11 usw.
+	IF "DB92_OP_Data".PicSet_Antr_Menu AND #CtrlJob_PicReq=0 THEN
+	    "DB92_OP_Data".Antr_Idx := 0;
+	    #CtrlJob_PicReq := "DB92_OP_Data".SPS_Idx + 10;
+	    "DB92_OP_Data".PicSet_Antr_Menu := 0;
+	END_IF;
+	//Parameterbild, vorerst nur ein Template (nicht typgetrennt)
+	IF "DB92_OP_Data".PicSet_Antr_Prm AND #CtrlJob_PicReq=0 THEN
+	    #CtrlJob_PicReq := 120;
+	    "DB92_OP_Data".PicSet_Antr_Prm := 0;
+	END_IF;
+	
+	#PicNum_AntrSub := ("DB92_OP_Data".PicNum[1] >= 100);   //aktuelle Bildnummer > 100 -> Detailbilder Antriebe/Parameter
+	IF NOT #PicNum_AntrSub AND #FM_PicNum_AntrSub THEN
+	    "DB92_OP_Data".Antr_Idx := 0;
+	END_IF;
+	#FM_PicNum_AntrSub := #PicNum_AntrSub;
+	
+	IF ("DB92_OP_Data".Antr_Idx <> #Antr_Idx_last) AND ("DB92_OP_Data".Antr_Idx>0) AND #CtrlJob_PicReq=0  THEN
+	    //Typbild anfordern, wenn Anzeige erlaubt ist
+	    IF "DB92_OP_Data".Antr_Idx <= 64 THEN
+	        #AnzSperr := "DB92_OP_Data".Antr_Bed_Sperr_0["DB92_OP_Data".Antr_Idx - 1];
+	    ELSE
+	        #AnzSperr := "DB92_OP_Data".Antr_Bed_Sperr_1["DB92_OP_Data".Antr_Idx - 65];
+	    END_IF;
+	    IF #AnzSperr THEN
+	        "DB92_OP_Data".Antr_Idx := 0;
+	    ELSE
+	        #CtrlJob_PicReq := "DB93_AntrIdx".ANTR2TYP["DB92_OP_Data".Antr_Idx]+100;
+	        //prüfen, ob Antrieb eigene oder ferne UV ist
+	        #Antr2UV:="DB93_AntrIdx".ANTR2UV["DB92_OP_Data".Antr_Idx];
+	        "DB92_OP_Data".Antr_UV_rem := (#Antr2UV <> "DB92_OP_Data".SPS_Idx);
+	        "DB92_OP_Data".Antr_UV_Idx := SHL(IN := BYTE#1, N:=INT_TO_UINT(#Antr2UV));
+	    END_IF;
+	    //Bezeichnung anzeigen
+	    "DB92_OP_Data".Antr_Text_Idx_vis := ("DB92_OP_Data".Antr_Idx-1) / 32;
+	    #tmp_word := INT_TO_UINT("DB92_OP_Data".Antr_Idx - 1 - "DB92_OP_Data".Antr_Text_Idx_vis * 32);
+	    CASE "DB92_OP_Data".Antr_Text_Idx_vis OF
+	        0:
+	            "DB92_OP_Data".Antr_Text_Idx_W0 := SHL(IN := DWORD#1, N := #tmp_word);
+	        1:
+	            "DB92_OP_Data".Antr_Text_Idx_W1 := SHL(IN := DWORD#1, N := #tmp_word);
+	        2:
+	            "DB92_OP_Data".Antr_Text_Idx_W2 := SHL(IN := DWORD#1, N := #tmp_word);
+	        3:
+	            "DB92_OP_Data".Antr_Text_Idx_W3 := SHL(IN := DWORD#1, N := #tmp_word);
+	    END_CASE;
+	    #Antr_Idx_last := "DB92_OP_Data".Antr_Idx;
+	END_IF;
+	
+	//Liste gesperrter Antriebe erstellen (je Zyklus eine Prüfung)
+	#AntrListChk_Idx := #AntrListChk_Idx + 1;
+	IF #AntrListChk_Idx > 128 THEN
+	    #AntrListChk_Idx := 1;
+	END_IF;
+	//prüfen, ob Antrieb in dieser UV angezeigt und verarbeitet werden soll
+	#Antr2OP := "DB93_AntrIdx".ANTR2OP[#AntrListChk_Idx];
+	#AnzSperr := ((#Antr2OP AND "DB92_OP_Data".SPS_Idx_BitIdx) = 0);
+	IF #AntrListChk_Idx <= 64 THEN
+	    "DB92_OP_Data".Antr_Bed_Sperr_0[#AntrListChk_Idx - 1]:=#AnzSperr;
+	ELSE
+	    "DB92_OP_Data".Antr_Bed_Sperr_1[#AntrListChk_Idx - 65]:=#AnzSperr;
+	END_IF;
+	//Berechtigungen für OP-Bedienung (Bed_UV und Bed_NHV) prüfen
+	#Antr2UV := "DB93_AntrIdx".ANTR2UV[#AntrListChk_Idx];
+	IF #Antr2UV = "DB92_OP_Data".SPS_Idx THEN   //betrifft nur die "eigenen", in der SPS verwalteten Antriebe, alle anderen haben keine Bed_UV-Berechtigung
+	    //Bedienberechtigung bei Bed_Perm>0 (1 - Einzelfreigabe Antrieb, 2> - Freigabe aller Antriebe in UV)
+	    #Bed_UV := 0;
+	    IF #Bed_Perm >= 2 THEN
+	        #Bed_UV := 1;
+	    ELSIF #Bed_Perm = 1 THEN
+	        #Bed_UV := (#AntrListChk_Idx = "DB92_OP_Data".Antr_Idx);    //Freigabe nur für ausgewählten Antrieb im Antriebsbild
+	    END_IF;
+	    //Freigabe in E/A-Bereich kopieren
+	    #Antr_EA_Bed:=PEEK(area:=16#84, dbNumber:=107, byteOffset:=#AntrListChk_Idx*6+2);
+	    #Antr_EA_Bed.%X6 := #Bed_UV;
+	    #Antr_EA_Bed.%X7 := "DB92_OP_Data".Bed_NHV[#AntrListChk_Idx];   //Bed_NHV
+	    POKE(area := 16#84,
+	         dbNumber := 107,
+	         byteOffset := #AntrListChk_Idx*6+2,
+	         value := #Antr_EA_Bed);
+	    
+	END_IF;
+	
+	
+	//Antriebsbild mit Daten versorgen
+	IF #PicNum_AntrSub THEN
+	    IF "DB92_OP_Data".PicNum[1] >= 120 THEN
+	        //Parameterbild -> Parameter einmalig einlesen
+	        IF NOT #PicNum_PrmSub_Rfrs THEN
+	            "FC63_DB_Copy"(DB_src := 106,
+	                           DB_src_offs := "DB92_OP_Data".Antr_Idx * 48,
+	                           DB_dest := 106,
+	                           DB_dest_offs := 0,
+	                           count := 48);
+	            #PicNum_PrmSub_Rfrs := 1;
+	        END_IF;
+	    ELSE
+	        //Antriebsbild -> Meldungen zyklisch einlesen
+	        IF "Imp_Sek" THEN
+	            "FC63_DB_Copy"(DB_src := 104,
+	                           DB_src_offs := "DB92_OP_Data".Antr_Idx * 48,
+	                           DB_dest := 104,
+	                           DB_dest_offs := 0,
+	                           count := 48);
+	        END_IF;
+	        //einmalig Handsollwert übernehmen (eigene aus DBxx_UV, ferne aus DBxx_NHV)
+	        IF NOT #PicNum_AntrSub_Rfrs THEN
+	            //"DB108_Antriebe_Bef_UV".KAW_OP.SW_Hand := "DB108_Antriebe_Bef_UV".KAW_xxx.SW_Hand;
+	            IF "DB92_OP_Data".Antr_UV_rem THEN
+	                "FC63_DB_Copy"(DB_src := 109,
+	                               DB_src_offs := "DB92_OP_Data".Antr_Idx * 8 + 4,
+	                               DB_dest := 108,
+	                               DB_dest_offs := 4,
+	                               count := 4);
+	            ELSE
+	                "FC63_DB_Copy"(DB_src := 108,
+	                               DB_src_offs := "DB92_OP_Data".Antr_Idx * 8 + 4,
+	                               DB_dest := 108,
+	                               DB_dest_offs := 4,
+	                               count := 4);
+	            END_IF;
+	            #SW_Hand_last := "DB108_Antriebe_Bef_UV".BB_G1.SW_Hand;
+	            #PicNum_AntrSub_Rfrs := 1;
+	        END_IF;
+	        #PicNum_PrmSub_Rfrs := 0;
+	    END_IF;
+	    //Parameter zurückschreiben bei Übernahme
+	    IF "DB106_Antriebe_Prm".BB_G1.Konfig.Prm_Set THEN
+	        "FC63_DB_Copy"(DB_src := 106,
+	                       DB_src_offs :=0,
+	                       DB_dest := 106,
+	                       DB_dest_offs :=  "DB92_OP_Data".Antr_Idx * 48,
+	                       count := 48);
+	        "DB106_Antriebe_Prm".BB_G1.Konfig.Prm_Set := 0;
+	    END_IF;
+	    //Befehle zurückschreiben bei Ausführung oder Hand-SW Änderung
+	    IF (#SW_Hand_last <> "DB108_Antriebe_Bef_UV".BB_G1.SW_Hand) THEN
+	        "DB108_Antriebe_Bef_UV".BB_G1.Bef.BF_Set_SW_chg := 1;
+	        #SW_Hand_last := "DB108_Antriebe_Bef_UV".BB_G1.SW_Hand;
+	    END_IF;
+	    IF "DB108_Antriebe_Bef_UV".BB_G1.Bef.BF_Set_SW_chg THEN
+	        //unterscheiden, ob Antrieb in eigener SPS bearbeitet wird oder remote (Befehlstelegramm versenden)
+	        //Änderungsbit jeweils stehen lassen bis abgeschickt
+	        IF "DB92_OP_Data".Antr_UV_rem THEN
+	            //ferne SPS -> vorher prüfen, ob Bedienberechtigung für Änderung passt
+	            IF "DB104_Antriebe_Meld".BB_G1.Status.Bed_NHV THEN
+	                "FC63_DB_Copy"(DB_src := 108,
+	                               DB_src_offs := 0,
+	                               DB_dest := 109,
+	                               DB_dest_offs := "DB92_OP_Data".Antr_Idx * 8,
+	                               count := 8);
+	            END_IF;
+	        ELSE
+	            //eigene SPS -> vorher prüfen, ob Bedienberechtigung für Änderung passt
+	            IF "DB104_Antriebe_Meld".BB_G1.Status.Bed_UV THEN
+	                "FC63_DB_Copy"(DB_src := 108,
+	                               DB_src_offs := 0,
+	                               DB_dest := 108,
+	                               DB_dest_offs := "DB92_OP_Data".Antr_Idx * 8,
+	                               count := 8);
+	            END_IF;
+	            
+	        END_IF;
+	        "DB108_Antriebe_Bef_UV".BB_G1.Bef.BF_Set_SW_chg := 0;
+	        //Befehle löschen
+	        #dw_Clr := 0;
+	        POKE(area := 16#84,
+	             dbNumber := 108,
+	             byteOffset := 0,
+	             value := #dw_Clr);
+	        
+	    END_IF;
+	ELSE
+	    #PicNum_PrmSub_Rfrs := 0;
+	    #PicNum_AntrSub_Rfrs := 0;
+	END_IF;
+	
+	//Quittierung Meldesystem
+	//
+	IF "DB92_OP_Data".MsgQuit THEN
+	    "FC64_DB_Fill"(DB_src := 92,
+	                   DB_src_offs := 88, //DB92.DBB88 (Start bei DBB24 -> 64 Byte Meldearray, 64 Byte PLC Quit)
+	                   FillVal := 255,
+	                   count := 64);
+	    #MsgQuit_Zyk := 1;
+	    "DB92_OP_Data".MsgQuit := 0;
+	END_IF;
+	#Tmr_MsgQuit_Zyk(IN:=#MsgQuit_Zyk,
+	                 PT:=t#2s);
+	IF #Tmr_MsgQuit_Zyk.Q THEN
+	    "FC64_DB_Fill"(DB_src := 92,
+	                   DB_src_offs := 88, //DB92.DBB76 (Start bei DBB24 -> 64 Byte Meldearray, 64 Byte PLC Quit)
+	                   FillVal := 0,
+	                   count := 64);
+	    #MsgQuit_Zyk := 0;
+	END_IF;
+	
+	    
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+END_FUNCTION_BLOCK
+
+FUNCTION "FC68_DB_Vgl_Copy" : Bool
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      DB_src : Int;   // Quell-DB, wenn 0, dann lesen von EBx...
+      DB_src_offs : Int;
+      DB_dest : Int;   // Ziel-DB, wenn 0, dann schreiben in ABx...
+      DB_dest_offs : Int;
+      count : Int;
+   END_VAR
+
+   VAR_TEMP 
+      value_org : Byte;
+      value_vgl : Byte;
+      i : Int;
+      chg : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	#chg := 0;
+	
+	FOR #i := 0 TO #count - 1 DO
+	    
+	    #value_org := PEEK_BYTE(area := 16#84, dbNumber := #DB_src, byteOffset := #DB_src_offs + #i);
+	    #value_vgl := PEEK_BYTE(area := 16#84, dbNumber := #DB_dest, byteOffset := #DB_dest_offs + #i);
+	    POKE(area := 16#84,
+	         dbNumber := #DB_dest,
+	         byteOffset := #DB_dest_offs + #i,
+	         value := #value_org);
+	    IF #value_org <> #value_vgl THEN
+	        #chg := 1;
+	    END_IF;
+	END_FOR;
+	#FC68_DB_Vgl_Copy := #chg;
+END_FUNCTION
+

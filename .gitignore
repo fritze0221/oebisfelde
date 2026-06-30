@@ -1,0 +1,24 @@
+# Claude Code – lokale, nicht versionierte Einstellungen
+.claude/settings.local.json
+
+# Abhängigkeiten
+node_modules/
+
+# Build-Artefakte
+dist/
+build/
+
+# Umgebungsvariablen / Secrets
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+
+# Betriebssystem / Editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

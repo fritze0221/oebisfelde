@@ -1,0 +1,3056 @@
+﻿FUNCTION_BLOCK "FB53_Mittelwert"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Zeitfenster { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt := 60;
+      Rohwert { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      Rohwert_nok { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Mittelwert { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+   END_VAR
+
+   VAR_IN_OUT 
+      MemDB : "T_MW_MITTEL";
+   END_VAR
+
+   VAR 
+      DataIdx_max { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      curInIdx { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      valid_Window { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+   END_VAR
+
+   VAR_TEMP 
+      i : Int;
+      s : Real;
+   END_VAR
+
+   VAR CONSTANT 
+      MaxEntries : Int := 120;
+   END_VAR
+
+
+BEGIN
+	    IF #Zeitfenster <= 0 THEN
+	        #DataIdx_max := 0;
+	    ELSIF #Zeitfenster > #MaxEntries THEN
+	        #DataIdx_max := #MaxEntries - 1;
+	    ELSE
+	        #DataIdx_max := DINT_TO_INT(#Zeitfenster) - 1;
+	    END_IF;
+	    IF #Rohwert_nok OR #DataIdx_max = 0 THEN
+	        #curInIdx := 0;
+	        #valid_Window := 0;
+	        #Mittelwert := #Rohwert;
+	    ELSE
+	        
+	        IF "Imp_Sek_Zyk_MW" THEN
+	            #MemDB.Values[#curInIdx] := #Rohwert;
+	            #curInIdx := #curInIdx + 1;
+	            IF #curInIdx > #DataIdx_max THEN
+	                #curInIdx := 0;
+	            END_IF;
+	            #s := 0.0;
+	            FOR #i := 0 TO #valid_Window DO
+	                #s := #s + #MemDB.Values[#i];
+	            END_FOR;
+	            #Mittelwert := #s / (INT_TO_REAL(#valid_Window + 1));
+	            IF #valid_Window < #DataIdx_max THEN
+	                #valid_Window := #valid_Window + 1;
+	            ELSE
+	                #valid_Window := #DataIdx_max;
+	            END_IF;
+	        END_IF;
+	    END_IF;
+	    
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB54_ZW"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_IN_OUT 
+      PLS_Bef : "T_ZW_BEF";
+   END_VAR
+
+   VAR 
+      ZW_int { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+      ZW_sub { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+      FM_Imp { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	IF #PLS_Bef.Reset THEN
+	    #PLS_Bef.ZW_Vortag := #PLS_Bef.ZW_Tag;
+	    #PLS_Bef.ZW_Tag := #ZW_sub;
+	    #ZW_sub := 0;
+	    #PLS_Bef.Reset := 0;
+	END_IF;
+	IF #PLS_Bef.Impuls AND NOT #FM_Imp THEN
+	    #ZW_int := #ZW_int +1;
+	    IF #ZW_int >= #PLS_Bef.Teiler THEN
+	        #ZW_int := 0;
+	        #PLS_Bef.ZW_raw := #PLS_Bef.ZW_raw + 1;
+	        #ZW_sub := #ZW_sub + 1;
+	    END_IF;
+	END_IF;
+	#FM_Imp := #PLS_Bef.Impuls;
+	
+	
+	
+	
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB78_ModbusOverIP_USV"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+// Bausteinparameter
+   VAR_INPUT 
+      Rec_ok : Bool;
+      Send_ok : Bool;
+      Rec_Len : UDInt;
+   END_VAR
+
+   VAR_OUTPUT 
+      Send_Req : Bool;
+      Kom_St : Bool;
+      Send_Len : UDInt;   // temporäre Variablen
+   END_VAR
+
+   VAR_IN_OUT 
+      Cmd_Aux01 : Bool;
+      Cmd_Aux02 : Bool;
+   END_VAR
+
+   VAR 
+      Tmr_PollCycle {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      Tmr_ReqTimeOut {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      TimeOut_cnt : Int;
+      TransActID_Cnt : Int;
+      ReqIdx : Int;
+      ReqIdx_Prio : Int;
+      TlgCycle : Bool;
+      ReqTimeSync : Bool;
+      PrioCycle : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      i : Int;
+      Data_Offs : Int;
+      SR_TransActID : Int;
+      SR_TransActID_Cnt : Int;
+      SR_TlgLen : Int;
+      SR_UnitID : Int;
+      SR_FunctionCode : Int;
+      SR_RegisterAdr : Int;
+      SR_RegisterCount : Int;
+      DB_Adr : Int;
+      DB_Num : Word;
+      w : Word;
+      b : Byte;
+      Rec_ok_save : Bool;
+   END_VAR
+
+
+BEGIN
+	    #Tmr_PollCycle(IN := NOT #TlgCycle,
+	                   PT := T#1s);
+	    #Tmr_ReqTimeOut(IN := #TlgCycle,
+	                    PT := T#4s);
+	    IF #Tmr_ReqTimeOut.Q THEN
+	        #TlgCycle := false;
+	        #Send_Req := false;
+	        IF (#TimeOut_cnt < 12) THEN
+	            #TimeOut_cnt := #TimeOut_cnt + 1;
+	        END_IF;
+	    END_IF;
+	    
+	    IF #TimeOut_cnt >= 12 THEN
+	        #Kom_St := true;
+	    ELSE
+	        #Kom_St := false;
+	    END_IF;
+	    #Rec_ok_save := #Rec_ok;
+	    IF #Rec_ok_save THEN
+	        //Header prüfen
+	        #SR_TransActID := BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[0]);
+	        #SR_TransActID_Cnt := BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[1]);
+	        #SR_TlgLen := BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[4]) * 256 + BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[5]) + 6;
+	        IF #SR_TransActID >= 1 AND #SR_TransActID <= "DB61_USV_ModTCP_WorkData".REQCNT AND #Rec_Len = #SR_TlgLen THEN
+	            #SR_UnitID := BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[6]);
+	            #SR_FunctionCode := BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[7]);
+	            #SR_RegisterCount := BYTE_TO_INT("DB59_USV_ModTCP_RCV".Data[8]) / 2; //hier Anzahl Datenbytes -> Registerzahl ist die Hälfte
+	            IF "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].UnitID = #SR_UnitID AND "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].FunctionCode = #SR_FunctionCode
+	                AND "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].RegisterCount = #SR_RegisterCount THEN //Prüfung ConID, function code und Bytelänge
+	                //Telegrammauswertung -> Registerdaten in hinterlegte Sourceadressen kopieren
+	                IF #SR_FunctionCode <= 4 THEN
+	                    #DB_Num := INT_TO_WORD("DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SourceDB_Num);
+	                    #DB_Adr := "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SourceDB_ByteAdr;
+	                    IF "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].QuadBytes THEN
+	                        #SR_RegisterCount := #SR_RegisterCount / 2;//Hack für Doppelwortübertragung (2 Register als low/high-Wort)
+	                    END_IF;
+	                    FOR #i := 0 TO #SR_RegisterCount - 1 DO
+	                        //wenn Diskrepanz bzgl. endianess -> hier die Bytes zuordnen/tauschen!
+	                        //Modbus ist i.d.R. big endian, d.h. high-byte kommt zuerst im Telegramm -> Wörter mit Bitmeldungen müssen geswappt werden
+	                        IF NOT "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].QuadBytes THEN
+	                            #Data_Offs := 9 + #i * 2;   //WORD-Size
+	                            IF NOT "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SwapBytes THEN
+	                                //WORD_TO_BLOCK_DB(#DB_Num).DB[#DB_Adr] :="DB59_USV_ModTCP_RCV".DB[#Data_Offs];
+	                                //WORD_TO_BLOCK_DB(#DB_Num).DB[#DB_Adr + 1] :="DB59_USV_ModTCP_RCV".DB[#Data_Offs+1];
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 1);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 1,
+	                                     value := #b);
+	                            ELSE
+	                                //WORD_TO_BLOCK_DB(#DB_Num).DB[#DB_Adr] :="DB59_USV_ModTCP_RCV".DB[#Data_Offs+1];
+	                                //WORD_TO_BLOCK_DB(#DB_Num).DB[#DB_Adr + 1] :="DB59_USV_ModTCP_RCV".DB[#Data_Offs];
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 1,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 1);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr,
+	                                     value := #b);
+	                            END_IF;
+	                            #DB_Adr := #DB_Adr + 2; //sonst +2 
+	                            
+	                        ELSE
+	                            #Data_Offs := 9 + #i * 4;   //<<DWORD-Size
+	                            IF NOT "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SwapBytes THEN
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 1);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 1,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 2);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 2,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 3);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 3,
+	                                     value := #b);
+	                            ELSE
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 3,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 1);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 2,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 2);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr + 1,
+	                                     value := #b);
+	                                #b := PEEK(area := 16#84, dbNumber := 59, byteOffset := #Data_Offs + 3);
+	                                POKE(area := 16#84,
+	                                     dbNumber := #DB_Num,
+	                                     byteOffset := #DB_Adr,
+	                                     value := #b);
+	                            END_IF;
+	                            #DB_Adr := #DB_Adr + 4; //sonst +2 
+	                        END_IF;
+	                        
+	                    END_FOR;
+	                ELSE
+	                    //Rückantwort nach Schreiben von Registern
+	                    #Rec_ok_save := true;
+	                END_IF;
+	                
+	            ELSE
+	                #Rec_ok_save := false;
+	            END_IF;
+	        ELSE
+	            #Rec_ok_save := false;
+	        END_IF;
+	        IF #Rec_ok_save THEN
+	            #TimeOut_cnt := 0;
+	        ELSE
+	            IF (#TimeOut_cnt < 12) THEN
+	                #TimeOut_cnt := #TimeOut_cnt + 1;
+	            END_IF;
+	        END_IF;
+	        #TlgCycle := false;
+	    END_IF;
+	    
+	    IF #Send_ok OR NOT #TlgCycle THEN
+	        #Send_Req := false;
+	    END_IF;
+	    
+	    //einmal täglich Zeitsync durchführen -> hier nicht implementiert
+	    (*
+	   IF ("akt_Std"=1 AND "akt_Min"=0 AND "akt_Sek"=0) THEN
+	       ReqTimeSync:=true;
+	   END_IF;
+	   *)
+	    
+	    IF #Tmr_PollCycle.Q THEN
+	        IF #TransActID_Cnt < 255 THEN
+	            #TransActID_Cnt := #TransActID_Cnt + 1;
+	        ELSE
+	            #TransActID_Cnt := 1;
+	        END_IF;
+	        //Schreibrichtung nicht implementiert!!
+	        IF #Cmd_Aux01 THEN
+	            #ReqIdx := 9;
+	            #Cmd_Aux01 := FALSE;
+	        ELSIF #Cmd_Aux02 THEN
+	            #ReqIdx := 9;
+	            #Cmd_Aux02 := FALSE;
+	        ELSIF #ReqTimeSync THEN
+	            #ReqIdx := 10;
+	        ELSE
+	            //Tlg. mit Prio-ID (z.B. Status Melder) werden jeden 2. Zyklus abgefragt, alle anderen zyklisch
+	            IF NOT #PrioCycle THEN
+	                #PrioCycle := TRUE;
+	                #SR_TransActID := #ReqIdx_Prio + 1;
+	                IF #SR_TransActID > "DB61_USV_ModTCP_WorkData".REQCNT THEN
+	                    #SR_TransActID := 1;
+	                END_IF;
+	                WHILE #SR_TransActID <> #ReqIdx_Prio DO
+	                    IF "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].TransactID_Prio = #SR_TransActID THEN
+	                        #ReqIdx_Prio := #SR_TransActID;
+	                    ELSE
+	                        #SR_TransActID := #SR_TransActID + 1;
+	                        IF #SR_TransActID > "DB61_USV_ModTCP_WorkData".REQCNT THEN
+	                            IF #ReqIdx_Prio = 0 THEN
+	                                #SR_TransActID := 0;
+	                            ELSE
+	                                #SR_TransActID := 1;
+	                            END_IF;
+	                        END_IF;
+	                    END_IF;
+	                END_WHILE;
+	                
+	            ELSE
+	                #PrioCycle := FALSE;
+	                #SR_TransActID := #ReqIdx + 1;
+	                IF #SR_TransActID > "DB61_USV_ModTCP_WorkData".REQCNT THEN
+	                    #SR_TransActID := 1;
+	                END_IF;
+	                WHILE #SR_TransActID <> #ReqIdx DO
+	                    IF "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].TransactID = #SR_TransActID THEN
+	                        #ReqIdx := #SR_TransActID;
+	                    ELSE
+	                        #SR_TransActID := #SR_TransActID + 1;
+	                        IF #SR_TransActID > "DB61_USV_ModTCP_WorkData".REQCNT THEN
+	                            IF #ReqIdx = 0 THEN
+	                                #SR_TransActID := 0;
+	                            ELSE
+	                                #SR_TransActID := 1;
+	                            END_IF;
+	                        END_IF;
+	                    END_IF;
+	                END_WHILE;
+	                
+	            END_IF;
+	        END_IF;
+	        IF #SR_TransActID > 0 THEN
+	            #SR_UnitID := "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].UnitID;
+	            #SR_FunctionCode := "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].FunctionCode;
+	            #SR_RegisterAdr := "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].RegisterAdr;
+	            #SR_RegisterCount := "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].RegisterCount;
+	            #Send_Len := 12;
+	            
+	            "DB60_USV_ModTCP_SEND".Data[0] := INT_TO_BYTE(#SR_TransActID);
+	            "DB60_USV_ModTCP_SEND".Data[1] := INT_TO_BYTE(#TransActID_Cnt);
+	            "DB60_USV_ModTCP_SEND".Data[2] := 0;      //Protokoll-ID
+	            "DB60_USV_ModTCP_SEND".Data[3] := 0;      //Protokoll-ID
+	            //Länge Sendetelegramm am Ende eintragen -> s.u.
+	            //"DB60_USV_ModTCP_SEND".Data[4]:=0;      //Data len Hi
+	            //"DB60_USV_ModTCP_SEND".Data[5]:=INT_TO_BYTE(Send_Len-6);      //Data len Lo
+	            "DB60_USV_ModTCP_SEND".Data[6] := INT_TO_BYTE(#SR_UnitID);      //Unit-ID
+	            "DB60_USV_ModTCP_SEND".Data[7] := INT_TO_BYTE(#SR_FunctionCode);      //Functioncode
+	            #w := INT_TO_WORD(#SR_RegisterAdr);
+	            "DB60_USV_ModTCP_SEND".Data[8] := WORD_TO_BYTE(SHR(IN := #w, N := 8) AND 16#FF);      //Register Address Hi
+	            "DB60_USV_ModTCP_SEND".Data[9] := WORD_TO_BYTE(#w AND 16#FF);      //Register Address Lo
+	            IF #SR_FunctionCode > 4 THEN
+	                //beim Schreiben von Registern wird ab hier Dateninhalt übergeben
+	                #DB_Num := INT_TO_WORD("DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SourceDB_Num);
+	                #DB_Adr := "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SourceDB_ByteAdr;
+	                FOR #i := 0 TO #SR_RegisterCount - 1 DO
+	                    #Data_Offs := 10 + #i * 2;
+	                    //wenn Diskrepanz bzgl. endianess -> hier die Bytes zuordnen/tauschen!
+	                    //Modbus ist i.d.R. big endian, d.h. high-byte kommt zuerst im Telegramm -> Wörter mit Bitmeldungen müssen geswappt werden
+	                    IF "DB61_USV_ModTCP_WorkData".REQ[#SR_TransActID].SwapBytes THEN
+	                        //"DB60_USV_ModTCP_SEND".DB[#Data_Offs + 1] := WORD_TO_BLOCK_DB(#DB_Num).DB[#DB_Adr];
+	                        //"DB60_USV_ModTCP_SEND".DB[#Data_Offs] := WORD_TO_BLOCK_DB (#DB_Num).DB[#DB_Adr + 1];
+	                        #b := PEEK(area := 16#84, dbNumber := #DB_Num, byteOffset := #DB_Adr);
+	                        POKE(area := 16#84,
+	                             dbNumber := 57,
+	                             byteOffset := #Data_Offs + 1,
+	                             value := #b);
+	                        #b := PEEK(area := 16#84, dbNumber := #DB_Num, byteOffset := #DB_Adr+1);
+	                        POKE(area := 16#84,
+	                             dbNumber := 57,
+	                             byteOffset := #Data_Offs,
+	                             value := #b);
+	                        
+	                    ELSE
+	                        //"DB60_USV_ModTCP_SEND".DB[#Data_Offs] := WORD_TO_BLOCK_DB(#DB_Num).DB[#DB_Adr];
+	                        //"DB60_USV_ModTCP_SEND".DB[#Data_Offs + 1] := WORD_TO_BLOCK_DB (#DB_Num).DB[#DB_Adr + 1];
+	                        #b := PEEK(area := 16#84, dbNumber := #DB_Num, byteOffset := #DB_Adr);
+	                        POKE(area := 16#84,
+	                             dbNumber := 57,
+	                             byteOffset := #Data_Offs,
+	                             value := #b);
+	                        #b := PEEK(area := 16#84, dbNumber := #DB_Num, byteOffset := #DB_Adr+1);
+	                        POKE(area := 16#84,
+	                             dbNumber := 57,
+	                             byteOffset := #Data_Offs+1,
+	                             value := #b);
+	                        
+	                    END_IF;
+	                END_FOR;
+	                #Send_Len := INT_TO_UDINT( 10 + (#SR_RegisterCount * 2));
+	            ELSE
+	                //beim Auslesen von Registern wird nur angeforderte Registerzahl übergeben
+	                #w := INT_TO_WORD(#SR_RegisterCount);
+	                "DB60_USV_ModTCP_SEND".Data[10] := WORD_TO_BYTE(SHR(IN := #w, N := 8) AND 16#FF);           //Register Count Hi
+	                "DB60_USV_ModTCP_SEND".Data[11] := WORD_TO_BYTE(#w AND 16#FF);      //Register Count Lo
+	                #Send_Len := 12;
+	            END_IF;
+	            //Länge Telegramm und Ergänzung Header
+	            #w := UDINT_TO_WORD(#Send_Len - 6);
+	            "DB60_USV_ModTCP_SEND".Data[4] := WORD_TO_BYTE(SHR(IN := #w, N := 8) AND 16#FF);       //Tlg.Len(-6) Hi
+	            "DB60_USV_ModTCP_SEND".Data[5] := WORD_TO_BYTE(#w AND 16#FF);                    //Tlg.Len(-6) Lo
+	            
+	            
+	            #TlgCycle := true;
+	            #Send_Req := true;
+	        END_IF;
+	    END_IF;
+	    
+	    
+	    
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB90_FU_CIM_EA"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      DP_aktiv : Bool;
+   END_VAR
+
+   VAR_IN_OUT 
+      EA_STD : "T_ANTRIEB_EA";
+      EA : "T_EA_FU_CIM_DP";
+      MELD : "T_ANTRIEB_MELD";
+   END_VAR
+
+   VAR 
+      PM_Start { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      Tmr_Reset {InstructionName := 'TOF_TIME'; LibVersion := '1.0'; ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : TOF_TIME;
+   END_VAR
+
+
+BEGIN
+	
+	//Eingangsebene
+	#EA_STD.E.FU_St := #EA.E.STW.Fault;
+	#EA_STD.E.FU := #EA.E.STW.Dosierung;
+	#EA_STD.E.Bed_vOrt := NOT #EA.E.STW.ActRemoteAccess AND 0;
+	
+	#EA_STD.E.UeDr_St := (#EA.E.FltCode = 210);
+	#EA_STD.E.UDr_St := (#EA.E.FltCode = 211);
+	#EA_STD.E.UeLM_St := (#EA.E.FltCode = 51);
+	#EA_STD.E.TL_St := (#EA.E.FltCode = 57);
+	#EA_STD.E.Kom_DP_St := (#EA.E.FltCode = 15) OR NOT #DP_aktiv;
+	#EA_STD.E.Kom_int_St := (#EA.E.FltCode = 152);
+	#EA_STD.E.Wart_Wa := (#EA.E.WrnCode = 12) OR (#EA.E.WrnCode = 33);
+	
+	#MELD.SW_akt := #EA.E.MeasuredDosingCapacity;   //Dosiermenge in l/h
+	
+	
+	//Ausgangsebene
+	IF #EA_STD.A.Req_extern_B1 THEN
+	    #PM_Start := 1;
+	END_IF;
+	IF NOT #EA_STD.A.Req_extern_B1 AND #EA.E.STW.ActualStartStop=1 THEN
+	    #PM_Start := 0;
+	END_IF;
+	
+	
+	#EA.A.RemoteAccessReq :=#PM_Start ;
+	#EA.A.FlowControlEnable := #PM_Start;
+	#EA.A.ProfiWatchdogEnable := #PM_Start;
+	
+	#MELD.Status.BFR_Ein1 := NOT #EA.E.STW.ActRemoteAccess;
+	
+	IF #EA_STD.A.FU THEN
+	    #EA.A.OperatingMode := 0;   //manual
+	    #EA.A.ReqStartStop := 0;    //Start-Request
+	    #EA.A.SetSetpointManual := #MELD.SW_out;
+	ELSE
+	    #EA.A.SetSetpointManual := 0.0;
+	    #EA.A.ReqStartStop := 1;    //Stop-Request
+	END_IF;
+	
+	
+	
+	
+	#Tmr_Reset(IN:=#EA_STD.A.Quit_extern,
+	           PT:=t#3s);
+	
+	IF #Tmr_Reset.Q THEN
+	    #EA.A.ResetFault := 1;
+	END_IF;
+	IF NOT #Tmr_Reset.Q OR #EA.E.STW.ResetFaultAck THEN
+	    #EA.A.ResetFault := 0;
+	END_IF;
+	
+	
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB91_FU_KAESER_EA"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      DP_aktiv : Bool;
+   END_VAR
+
+   VAR_IN_OUT 
+      EA_STD : "T_ANTRIEB_EA";
+      EA : "T_EA_KAESER";
+      MELD : "T_ANTRIEB_MELD";
+   END_VAR
+
+   VAR 
+      PM_Start { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      Tmr_Reset {InstructionName := 'TOF_TIME'; LibVersion := '1.0'; ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : TOF_TIME;
+   END_VAR
+
+
+BEGIN
+	
+	//Eingangsebene
+	#EA_STD.E.FU_St := #EA.E.Msg_dig.xBS6;
+	#EA_STD.E.FU := #EA.E.Msg_dig.xBS1;
+	#EA_STD.E.Bed_vOrt := #EA_STD.E.Bed_vOrt OR #EA.E.Msg_dig.xBS4;
+	#EA_STD.E.Aus := NOT #EA.E.Msg_dig.xBS5;
+	
+	#EA_STD.E.Kom_DP_St := NOT #DP_aktiv;
+	#EA_STD.E.Wart_Wa := #EA.E.Msg_dig.xBS7;
+	
+	#MELD.SW_akt := UINT_TO_REAL(#EA.E.Blockdrehzahl);   //DZ nach Getriebe in 1/min
+	#MELD.MW_I := INT_TO_REAL(#EA.E.FU_Strom) / 100.0;
+	#MELD.MW_P := INT_TO_REAL(#EA.E.HM_Leistung) / 10.0;
+	#MELD.EZ := UINT_TO_DINT(#EA.E.EZ_x1000) * DINT#1000+UINT_TO_DINT(#EA.E.EZ_x1);
+	
+	//Ausgangsebene
+	IF #EA_STD.A.Req_extern_B1 THEN
+	    #PM_Start := 1;
+	END_IF;
+	IF NOT #EA_STD.A.Req_extern_B1 THEN
+	    #PM_Start := 0;
+	END_IF;
+	
+	
+	#EA.A.Cmd_b1.xBS48 :=#PM_Start ;
+	
+	#MELD.Status.BFR_Ein1 := NOT #EA.E.Msg_dig.xBS5;
+	
+	IF #EA_STD.A.FU OR #EA_STD.A.Req_extern_B1 THEN
+	    #EA.A.Solldrehzahl_Block := REAL_TO_UINT(#MELD.SW_out);
+	ELSE
+	    #EA.A.Solldrehzahl_Block := 0;
+	END_IF;
+	
+	
+	
+	
+	#Tmr_Reset(IN:=#EA_STD.A.Quit_extern,
+	           PT:=t#3s);
+	
+	IF #Tmr_Reset.Q THEN
+	    #EA.A.Cmd_b1.xBS54 := 1;
+	    #EA.A.Cmd_b1.xBS55 := 1;
+	END_IF;
+	IF NOT #Tmr_Reset.Q OR #EA.E.Msg_dig.xBS55 THEN
+	    #EA.A.Cmd_b1.xBS54 := 0;
+	    #EA.A.Cmd_b1.xBS55 := 0;
+	END_IF;
+	
+	#EA.A.MasterMsgHeader := #EA.E.SlvMsgHeader;
+	#EA.A.MasterMsgFooter := #EA.E.SlvMsgFooter;
+	
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB2_Messwerte"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      Zulauf_AR_Niv : "FB52_Messwert";
+      Zulauf_AR_Temp : "FB52_Messwert";
+      Zulauf_AR_DF : "FB52_Messwert";
+      BB1_AS1_SS : "FB52_Messwert";
+      BB1_AS2_SS : "FB52_Messwert";
+      BB2_AS1_SS : "FB52_Messwert";
+      BB2_AS2_SS : "FB52_Messwert";
+      BB1_O2 : "FB52_Messwert";
+      BB1_Temp : "FB52_Messwert";
+      BB2_O2 : "FB52_Messwert";
+      BB2_Temp : "FB52_Messwert";
+      BB1_DF : "FB52_Messwert";
+      BB2_DF : "FB52_Messwert";
+      Zulauf_Niv : "FB52_Messwert";
+      Zulauf_DF : "FB52_Messwert";
+      Verteiler_pH : "FB52_Messwert";
+      Verteiler_O2 : "FB52_Messwert";
+      Verteiler_Temp : "FB52_Messwert";
+      BB_UeSS_DF : "FB52_Messwert";
+      Ablauf_DF : "FB52_Messwert";
+      Ablauf_pH : "FB52_Messwert";
+      Ablauf_O2 : "FB52_Messwert";
+      Ablauf_Temp : "FB52_Messwert";
+      Schlamm_ED_Niv : "FB52_Messwert";
+      Schlamm_Besch_Niv : "FB52_Messwert";
+      Schlamm_Besch_DF : "FB52_Messwert";
+      Truebwasser_Niv : "FB52_Messwert";
+      Truebwasser_DF : "FB52_Messwert";
+      Zulauf_SF_Niv : "FB52_Messwert";
+      Ablauf_NOx : "FB52_Messwert";
+      Ablauf_PO4 : "FB52_Messwert";
+      Umwelt_WG : "FB52_Messwert";
+      Umwelt_WR : "FB52_Messwert";
+      Umwelt_LDr : "FB52_Messwert";
+      Umwelt_LF : "FB52_Messwert";
+      Umwelt_T : "FB52_Messwert";
+      Ablauf_LF : "FB52_Messwert";
+      ZykIdx : Int;
+      Imp_Sek_Init : Bool;
+      ZW_Zulauf_AR_DF { S7_SetPoint := 'False'} : "FB54_ZW";
+      ZW_Ablauf_DF : "FB54_ZW";
+      ZW_BB_UeSS_DF : "FB54_ZW";
+      ZW_BB1_DF : "FB54_ZW";
+      ZW_BB2_DF : "FB54_ZW";
+      ZW_Zulauf_DF : "FB54_ZW";
+      ZW_Schlamm_Besch_DF : "FB54_ZW";
+      ZW_Truebwasser_DF : "FB54_ZW";
+      ZW_Umwelt_RM : "FB54_ZW";
+   END_VAR
+
+
+BEGIN
+	IF "Imp_Sek" AND NOT "Imp_Sek_Zyk_MW" THEN
+	  #Imp_Sek_Init := 1;
+	END_IF;
+	
+	#ZykIdx := #ZykIdx + 1;
+	IF #ZykIdx > 36 THEN
+	  #ZykIdx := 1;
+	  "Imp_Sek_Zyk_MW" := 0;
+	  IF #Imp_Sek_Init THEN
+	    "Imp_Sek_Zyk_MW" := 1;
+	    #Imp_Sek_Init := 0;
+	  END_IF;
+	END_IF;
+	
+	IF #ZykIdx = 1 THEN
+	    #Zulauf_AR_Niv(Typ := 0,
+	                   Idx := 1,
+	                   EA := "DB117_MW_EA".Zulauf_AR_Niv,
+	                   MELD := "DB114_MW_Meld".Zulauf_AR_Niv,
+	                   BEF := "DB115_MW_Bef_PLS".Zulauf_AR_Niv,
+	                   PRM := "DB116_MW_Prm".Zulauf_AR_Niv,
+	                   MW_MemDB := "DB90_MW_Mittel".Zulauf_AR_Niv);
+	END_IF;
+	IF #ZykIdx = 2 THEN
+	    #Zulauf_AR_Temp(Typ := 0,
+	                    Idx := 2,
+	                    EA := "DB117_MW_EA".Zulauf_AR_Temp,
+	                    MELD := "DB114_MW_Meld".Zulauf_AR_Temp,
+	                    BEF := "DB115_MW_Bef_PLS".Zulauf_AR_Temp,
+	                    PRM := "DB116_MW_Prm".Zulauf_AR_Temp,
+	                    MW_MemDB := "DB90_MW_Mittel".Zulauf_AR_Temp);
+	END_IF;
+	IF #ZykIdx = 3 THEN
+	    #Zulauf_AR_DF(Typ := 0,
+	                  Idx := 3,
+	                  EA := "DB117_MW_EA".Zulauf_AR_DF,
+	                  MELD := "DB114_MW_Meld".Zulauf_AR_DF,
+	                  BEF := "DB115_MW_Bef_PLS".Zulauf_AR_DF,
+	                  PRM := "DB116_MW_Prm".Zulauf_AR_DF,
+	                  MW_MemDB := "DB90_MW_Mittel".Zulauf_AR_DF);
+	END_IF;
+	IF #ZykIdx = 4 THEN
+	    #BB1_AS1_SS(Typ := 0,
+	                Idx := 4,
+	                EA := "DB117_MW_EA".BB1_AS1_SS,
+	                MELD := "DB114_MW_Meld".BB1_AS1_SS,
+	                BEF := "DB115_MW_Bef_PLS".BB1_AS1_SS,
+	                PRM := "DB116_MW_Prm".BB1_AS1_SS,
+	                MW_MemDB := "DB90_MW_Mittel".BB1_AS1_SS);
+	END_IF;
+	IF #ZykIdx = 5 THEN
+	    #BB1_AS2_SS(Typ := 0,
+	                Idx := 5,
+	                EA := "DB117_MW_EA".BB1_AS2_SS,
+	                MELD := "DB114_MW_Meld".BB1_AS2_SS,
+	                BEF := "DB115_MW_Bef_PLS".BB1_AS2_SS,
+	                PRM := "DB116_MW_Prm".BB1_AS2_SS,
+	                MW_MemDB := "DB90_MW_Mittel".BB1_AS2_SS);
+	END_IF;
+	IF #ZykIdx = 6 THEN
+	    #BB2_AS1_SS(Typ := 0,
+	                Idx := 6,
+	                EA := "DB117_MW_EA".BB2_AS1_SS,
+	                MELD := "DB114_MW_Meld".BB2_AS1_SS,
+	                BEF := "DB115_MW_Bef_PLS".BB2_AS1_SS,
+	                PRM := "DB116_MW_Prm".BB2_AS1_SS,
+	                MW_MemDB := "DB90_MW_Mittel".BB2_AS1_SS);
+	END_IF;
+	IF #ZykIdx = 7 THEN
+	    #BB2_AS2_SS(Typ := 0,
+	                Idx := 7,
+	                EA := "DB117_MW_EA".BB2_AS2_SS,
+	                MELD := "DB114_MW_Meld".BB2_AS2_SS,
+	                BEF := "DB115_MW_Bef_PLS".BB2_AS2_SS,
+	                PRM := "DB116_MW_Prm".BB2_AS2_SS,
+	                MW_MemDB := "DB90_MW_Mittel".BB2_AS2_SS);
+	END_IF;
+	IF #ZykIdx = 8 THEN
+	    #BB1_O2(Typ := 0,
+	            Idx := 8,
+	            EA := "DB117_MW_EA".BB1_O2,
+	            MELD := "DB114_MW_Meld".BB1_O2,
+	            BEF := "DB115_MW_Bef_PLS".BB1_O2,
+	            PRM := "DB116_MW_Prm".BB1_O2,
+	            MW_MemDB := "DB90_MW_Mittel".BB1_O2);
+	END_IF;
+	IF #ZykIdx = 9 THEN
+	    #BB1_Temp(Typ := 0,
+	              Idx := 9,
+	              EA := "DB117_MW_EA".BB1_Temp,
+	              MELD := "DB114_MW_Meld".BB1_Temp,
+	              BEF := "DB115_MW_Bef_PLS".BB1_Temp,
+	              PRM := "DB116_MW_Prm".BB1_Temp,
+	              MW_MemDB := "DB90_MW_Mittel".BB1_Temp);
+	END_IF;
+	IF #ZykIdx = 10 THEN
+	    #BB2_O2(Typ := 0,
+	            Idx := 10,
+	            EA := "DB117_MW_EA".BB2_O2,
+	            MELD := "DB114_MW_Meld".BB2_O2,
+	            BEF := "DB115_MW_Bef_PLS".BB2_O2,
+	            PRM := "DB116_MW_Prm".BB2_O2,
+	            MW_MemDB := "DB90_MW_Mittel".BB2_O2);
+	END_IF;
+	IF #ZykIdx = 11 THEN
+	    #BB2_Temp(Typ := 0,
+	              Idx := 11,
+	              EA := "DB117_MW_EA".BB2_Temp,
+	              MELD := "DB114_MW_Meld".BB2_Temp,
+	              BEF := "DB115_MW_Bef_PLS".BB2_Temp,
+	              PRM := "DB116_MW_Prm".BB2_Temp,
+	              MW_MemDB := "DB90_MW_Mittel".BB2_Temp);
+	END_IF;
+	IF #ZykIdx = 12 THEN
+	    #BB1_DF(Typ := 0,
+	            Idx := 12,
+	            EA := "DB117_MW_EA".BB1_DF,
+	            MELD := "DB114_MW_Meld".BB1_DF,
+	            BEF := "DB115_MW_Bef_PLS".BB1_DF,
+	            PRM := "DB116_MW_Prm".BB1_DF,
+	            MW_MemDB := "DB90_MW_Mittel".BB1_DF);
+	END_IF;
+	IF #ZykIdx = 13 THEN
+	    #BB2_DF(Typ := 0,
+	            Idx := 13,
+	            EA := "DB117_MW_EA".BB2_DF,
+	            MELD := "DB114_MW_Meld".BB2_DF,
+	            BEF := "DB115_MW_Bef_PLS".BB2_DF,
+	            PRM := "DB116_MW_Prm".BB2_DF,
+	            MW_MemDB := "DB90_MW_Mittel".BB2_DF);
+	END_IF;
+	IF #ZykIdx = 14 THEN
+	    #Zulauf_Niv(Typ := 0,
+	                Idx := 14,
+	                EA := "DB117_MW_EA".Zulauf_Niv,
+	                MELD := "DB114_MW_Meld".Zulauf_Niv,
+	                BEF := "DB115_MW_Bef_PLS".Zulauf_Niv,
+	                PRM := "DB116_MW_Prm".Zulauf_Niv,
+	                MW_MemDB := "DB90_MW_Mittel".Zulauf_Niv);
+	END_IF;
+	IF #ZykIdx = 15 THEN
+	    #Zulauf_DF(Typ := 0,
+	               Idx := 15,
+	               EA := "DB117_MW_EA".Zulauf_DF,
+	               MELD := "DB114_MW_Meld".Zulauf_DF,
+	               BEF := "DB115_MW_Bef_PLS".Zulauf_DF,
+	               PRM := "DB116_MW_Prm".Zulauf_DF,
+	               MW_MemDB := "DB90_MW_Mittel".Zulauf_DF);
+	END_IF;
+	IF #ZykIdx = 16 THEN
+	    #Verteiler_pH(Typ := 0,
+	                  Idx := 16,
+	                  EA := "DB117_MW_EA".Verteiler_pH,
+	                  MELD := "DB114_MW_Meld".Verteiler_pH,
+	                  BEF := "DB115_MW_Bef_PLS".Verteiler_pH,
+	                  PRM := "DB116_MW_Prm".Verteiler_pH,
+	                  MW_MemDB := "DB90_MW_Mittel".Verteiler_pH);
+	END_IF;
+	IF #ZykIdx = 17 THEN
+	    #Verteiler_O2(Typ := 0,
+	                  Idx := 17,
+	                  EA := "DB117_MW_EA".Verteiler_O2,
+	                  MELD := "DB114_MW_Meld".Verteiler_O2,
+	                  BEF := "DB115_MW_Bef_PLS".Verteiler_O2,
+	                  PRM := "DB116_MW_Prm".Verteiler_O2,
+	                  MW_MemDB := "DB90_MW_Mittel".Verteiler_O2);
+	END_IF;
+	IF #ZykIdx = 18 THEN
+	    #Verteiler_Temp(Typ := 0,
+	                    Idx := 18,
+	                    EA := "DB117_MW_EA".Verteiler_Temp,
+	                    MELD := "DB114_MW_Meld".Verteiler_Temp,
+	                    BEF := "DB115_MW_Bef_PLS".Verteiler_Temp,
+	                    PRM := "DB116_MW_Prm".Verteiler_Temp,
+	                    MW_MemDB := "DB90_MW_Mittel".Verteiler_Temp);
+	END_IF;
+	IF #ZykIdx = 19 THEN
+	    #BB_UeSS_DF(Typ := 0,
+	                Idx := 19,
+	                EA := "DB117_MW_EA".BB_UeSS_DF,
+	                MELD := "DB114_MW_Meld".BB_UeSS_DF,
+	                BEF := "DB115_MW_Bef_PLS".BB_UeSS_DF,
+	                PRM := "DB116_MW_Prm".BB_UeSS_DF,
+	                MW_MemDB := "DB90_MW_Mittel".BB_UeSS_DF);
+	END_IF;
+	IF #ZykIdx = 20 THEN
+	    #Ablauf_DF(Typ := 0,
+	               Idx := 20,
+	               EA := "DB117_MW_EA".Ablauf_DF,
+	               MELD := "DB114_MW_Meld".Ablauf_DF,
+	               BEF := "DB115_MW_Bef_PLS".Ablauf_DF,
+	               PRM := "DB116_MW_Prm".Ablauf_DF,
+	               MW_MemDB := "DB90_MW_Mittel".Ablauf_DF);
+	END_IF;
+	IF #ZykIdx = 21 THEN
+	    #Ablauf_pH(Typ := 0,
+	               Idx := 21,
+	               EA := "DB117_MW_EA".Ablauf_pH,
+	               MELD := "DB114_MW_Meld".Ablauf_pH,
+	               BEF := "DB115_MW_Bef_PLS".Ablauf_pH,
+	               PRM := "DB116_MW_Prm".Ablauf_pH,
+	               MW_MemDB := "DB90_MW_Mittel".Ablauf_pH);
+	END_IF;
+	IF #ZykIdx = 22 THEN
+	    #Ablauf_O2(Typ := 0,
+	               Idx := 22,
+	               EA := "DB117_MW_EA".Ablauf_O2,
+	               MELD := "DB114_MW_Meld".Ablauf_O2,
+	               BEF := "DB115_MW_Bef_PLS".Ablauf_O2,
+	               PRM := "DB116_MW_Prm".Ablauf_O2,
+	               MW_MemDB := "DB90_MW_Mittel".Ablauf_O2);
+	END_IF;
+	IF #ZykIdx = 23 THEN
+	    #Ablauf_Temp(Typ := 0,
+	                 Idx := 23,
+	                 EA := "DB117_MW_EA".Ablauf_Temp,
+	                 MELD := "DB114_MW_Meld".Ablauf_Temp,
+	                 BEF := "DB115_MW_Bef_PLS".Ablauf_Temp,
+	                 PRM := "DB116_MW_Prm".Ablauf_Temp,
+	                 MW_MemDB := "DB90_MW_Mittel".Ablauf_Temp);
+	END_IF;
+	IF #ZykIdx = 24 THEN
+	    #Schlamm_ED_Niv(Typ := 0,
+	                    Idx := 24,
+	                    EA := "DB117_MW_EA".Schlamm_ED_Niv,
+	                    MELD := "DB114_MW_Meld".Schlamm_ED_Niv,
+	                    BEF := "DB115_MW_Bef_PLS".Schlamm_ED_Niv,
+	                    PRM := "DB116_MW_Prm".Schlamm_ED_Niv,
+	                    MW_MemDB := "DB90_MW_Mittel".Schlamm_ED_Niv);
+	END_IF;
+	IF #ZykIdx = 25 THEN
+	    #Schlamm_Besch_Niv(Typ := 0,
+	                       Idx := 25,
+	                       EA := "DB117_MW_EA".Schlamm_Besch_Niv,
+	                       MELD := "DB114_MW_Meld".Schlamm_Besch_Niv,
+	                       BEF := "DB115_MW_Bef_PLS".Schlamm_Besch_Niv,
+	                       PRM := "DB116_MW_Prm".Schlamm_Besch_Niv,
+	                       MW_MemDB := "DB90_MW_Mittel".Schlamm_Besch_Niv);
+	END_IF;
+	IF #ZykIdx = 26 THEN
+	    #Schlamm_Besch_DF(Typ := 0,
+	                      Idx := 26,
+	                      EA := "DB117_MW_EA".Schlamm_Besch_DF,
+	                      MELD := "DB114_MW_Meld".Schlamm_Besch_DF,
+	                      BEF := "DB115_MW_Bef_PLS".Schlamm_Besch_DF,
+	                      PRM := "DB116_MW_Prm".Schlamm_Besch_DF,
+	                      MW_MemDB := "DB90_MW_Mittel".Schlamm_Besch_DF);
+	END_IF;
+	IF #ZykIdx = 27 THEN
+	    #Truebwasser_Niv(Typ := 0,
+	                     Idx := 27,
+	                     EA := "DB117_MW_EA".Truebwasser_Niv,
+	                     MELD := "DB114_MW_Meld".Truebwasser_Niv,
+	                     BEF := "DB115_MW_Bef_PLS".Truebwasser_Niv,
+	                     PRM := "DB116_MW_Prm".Truebwasser_Niv,
+	                     MW_MemDB := "DB90_MW_Mittel".Truebwasser_Niv);
+	END_IF;
+	IF #ZykIdx = 28 THEN
+	    #Truebwasser_DF(Typ := 0,
+	                    Idx := 28,
+	                    EA := "DB117_MW_EA".Truebwasser_DF,
+	                    MELD := "DB114_MW_Meld".Truebwasser_DF,
+	                    BEF := "DB115_MW_Bef_PLS".Truebwasser_DF,
+	                    PRM := "DB116_MW_Prm".Truebwasser_DF,
+	                    MW_MemDB := "DB90_MW_Mittel".Truebwasser_DF);
+	END_IF;
+	IF #ZykIdx = 29 THEN
+	    #Zulauf_SF_Niv(Typ := 0,
+	                   Idx := 29,
+	                   EA := "DB117_MW_EA".Zulauf_SF_Niv,
+	                   MELD := "DB114_MW_Meld".Zulauf_SF_Niv,
+	                   BEF := "DB115_MW_Bef_PLS".Zulauf_SF_Niv,
+	                   PRM := "DB116_MW_Prm".Zulauf_SF_Niv,
+	                   MW_MemDB := "DB90_MW_Mittel".Zulauf_SF_Niv);
+	END_IF;
+	IF #ZykIdx = 30 THEN
+	    #Ablauf_NOx(Typ := 0,
+	                   Idx := 30,
+	                   EA := "DB117_MW_EA".Ablauf_NOx,
+	                   MELD := "DB114_MW_Meld".Ablauf_NOx,
+	                   BEF := "DB115_MW_Bef_PLS".Ablauf_NOx,
+	                   PRM := "DB116_MW_Prm".Ablauf_NOx,
+	                   MW_MemDB := "DB90_MW_Mittel".Ablauf_NOx);
+	END_IF;
+	IF #ZykIdx = 31 THEN
+	    #Ablauf_PO4(Typ := 0,
+	                   Idx := 31,
+	                   EA := "DB117_MW_EA".Ablauf_PO4,
+	                   MELD := "DB114_MW_Meld".Ablauf_PO4,
+	                   BEF := "DB115_MW_Bef_PLS".Ablauf_PO4,
+	                   PRM := "DB116_MW_Prm".Ablauf_PO4,
+	                   MW_MemDB := "DB90_MW_Mittel".Ablauf_PO4);
+	   END_IF;
+	   IF #ZykIdx = 32 THEN
+	       #Umwelt_WG(Typ := 0,
+	                  Idx := 31,
+	                  EA := "DB117_MW_EA".Umwelt_WG,
+	                  MELD := "DB114_MW_Meld".Umwelt_WG,
+	                  BEF := "DB115_MW_Bef_PLS".Umwelt_WG,
+	                  PRM := "DB116_MW_Prm".Umwelt_WG,
+	                  MW_MemDB := "DB90_MW_Mittel".Umwelt_WG);
+	   END_IF;
+	   IF #ZykIdx = 33 THEN
+	       #Umwelt_WR(Typ := 0,
+	                  Idx := 32,
+	                  EA := "DB117_MW_EA".Umwelt_WR,
+	                  MELD := "DB114_MW_Meld".Umwelt_WR,
+	                  BEF := "DB115_MW_Bef_PLS".Umwelt_WR,
+	                  PRM := "DB116_MW_Prm".Umwelt_WR,
+	                  MW_MemDB := "DB90_MW_Mittel".Umwelt_WR);
+	   END_IF;
+	   IF #ZykIdx = 34 THEN
+	       #Umwelt_LDr(Typ := 0,
+	                   Idx := 33,
+	                   EA := "DB117_MW_EA".Umwelt_LDr,
+	                   MELD := "DB114_MW_Meld".Umwelt_LDr,
+	                   BEF := "DB115_MW_Bef_PLS".Umwelt_LDr,
+	                   PRM := "DB116_MW_Prm".Umwelt_LDr,
+	                   MW_MemDB := "DB90_MW_Mittel".Umwelt_LDr);
+	   END_IF;
+	   IF #ZykIdx = 35 THEN
+	       #Umwelt_LF(Typ := 0,
+	                  Idx := 34,
+	                  EA := "DB117_MW_EA".Umwelt_LF,
+	                  MELD := "DB114_MW_Meld".Umwelt_LF,
+	                  BEF := "DB115_MW_Bef_PLS".Umwelt_LF,
+	                  PRM := "DB116_MW_Prm".Umwelt_LF,
+	                  MW_MemDB := "DB90_MW_Mittel".Umwelt_LF);
+	   END_IF;
+	   IF #ZykIdx = 36 THEN
+	       #Umwelt_T(Typ := 0,
+	                 Idx := 35,
+	                 EA := "DB117_MW_EA".Umwelt_T,
+	                 MELD := "DB114_MW_Meld".Umwelt_T,
+	                 BEF := "DB115_MW_Bef_PLS".Umwelt_T,
+	                 PRM := "DB116_MW_Prm".Umwelt_T,
+	                 MW_MemDB := "DB90_MW_Mittel".Umwelt_T);
+	   END_IF;
+	   IF #ZykIdx = 36 THEN
+	       #Ablauf_LF(Typ := 0,
+	                  Idx := 36,
+	                  EA := "DB117_MW_EA".Ablauf_LF,
+	                  MELD := "DB114_MW_Meld".Ablauf_LF,
+	                  BEF := "DB115_MW_Bef_PLS".Ablauf_LF,
+	                  PRM := "DB116_MW_Prm".Ablauf_LF,
+	                  MW_MemDB := "DB90_MW_Mittel".Ablauf_LF);
+	   END_IF;
+	   
+	
+	"DB96_ZW".Zulauf_AR_DF.Reset := ("Imp_Std" AND ("akt_Std"=8));
+	"DB96_ZW".Ablauf_DF.Reset := "DB96_ZW".Zulauf_AR_DF.Reset;
+	"DB96_ZW".BB_UeSS_DF.Reset := "DB96_ZW".Zulauf_AR_DF.Reset;
+	"DB96_ZW".Zulauf_DF.Reset := "DB96_ZW".Zulauf_AR_DF.Reset;
+	"DB96_ZW".Schlamm_Besch_DF.Reset := "DB96_ZW".Zulauf_AR_DF.Reset;
+	"DB96_ZW".Truebwasser_DF.Reset := "DB96_ZW".Zulauf_AR_DF.Reset;
+	"DB96_ZW".Umwelt_RM.Reset := "DB96_ZW".Zulauf_AR_DF.Reset;
+	
+	#ZW_Zulauf_AR_DF("DB96_ZW".Zulauf_AR_DF);
+	#ZW_Ablauf_DF("DB96_ZW".Ablauf_DF);
+	#ZW_BB_UeSS_DF("DB96_ZW".BB_UeSS_DF);
+	#ZW_Zulauf_DF("DB96_ZW".Zulauf_DF);
+	#ZW_Schlamm_Besch_DF("DB96_ZW".Schlamm_Besch_DF);
+	#ZW_Truebwasser_DF("DB96_ZW".Truebwasser_DF);
+	#ZW_Umwelt_RM("DB96_ZW".Umwelt_RM);
+	
+	
+	"ZEN_MW".Zulauf_AR_DF_ZW := "DB96_ZW".Zulauf_AR_DF.ZW_raw;
+	"ZEN_MW".Zulauf_AR_DF_ZW_Tag := "DB96_ZW".Zulauf_AR_DF.ZW_Tag;
+	"ZEN_MW".Zulauf_AR_DF_ZW_Vortag := "DB96_ZW".Zulauf_AR_DF.ZW_Vortag;
+	
+	"ZEN_MW".Ablauf_DF_ZW := "DB96_ZW".Ablauf_DF.ZW_raw;
+	"ZEN_MW".Ablauf_DF_ZW_Tag := "DB96_ZW".Ablauf_DF.ZW_Tag;
+	"ZEN_MW".Ablauf_DF_ZW_Vortag := "DB96_ZW".Ablauf_DF.ZW_Vortag;
+	
+	"ZEN_MW".BB_UeSS_DF_ZW := DINT_TO_REAL("DB96_ZW".BB_UeSS_DF.ZW_raw)/10.0;
+	"ZEN_MW".BB_UeSS_DF_ZW_Tag := DINT_TO_REAL("DB96_ZW".BB_UeSS_DF.ZW_Tag)/10.0;
+	"ZEN_MW".BB_UeSS_DF_ZW_Vortag := DINT_TO_REAL("DB96_ZW".BB_UeSS_DF.ZW_Vortag)/10.0;
+	
+	"ZEN_MW".Zulauf_DF_ZW := "DB96_ZW".Zulauf_DF.ZW_raw;
+	"ZEN_MW".Zulauf_DF_ZW_Tag := "DB96_ZW".Zulauf_DF.ZW_Tag;
+	"ZEN_MW".Zulauf_DF_ZW_Vortag := "DB96_ZW".Zulauf_DF.ZW_Vortag;
+	
+	"ZEN_MW".Schlamm_Besch_DF_ZW := "DB96_ZW".Schlamm_Besch_DF.ZW_raw;
+	"ZEN_MW".Schlamm_Besch_DF_ZW_Tag := "DB96_ZW".Schlamm_Besch_DF.ZW_Tag;
+	"ZEN_MW".Schlamm_Besch_DF_ZW_Vortag := "DB96_ZW".Schlamm_Besch_DF.ZW_Vortag;
+	
+	"ZEN_MW".Truebwasser_DF_ZW := "DB96_ZW".Truebwasser_DF.ZW_raw;
+	"ZEN_MW".Truebwasser_DF_ZW_Tag := "DB96_ZW".Truebwasser_DF.ZW_Tag;
+	"ZEN_MW".Truebwasser_DF_ZW_Vortag := "DB96_ZW".Truebwasser_DF.ZW_Vortag;
+	
+	"ZEN_MW".Umwelt_RM_ZW := DINT_TO_REAL("DB96_ZW".Umwelt_RM.ZW_raw) / 10.0;
+	"ZEN_MW".Umwelt_RM_ZW_Tag := DINT_TO_REAL("DB96_ZW".Umwelt_RM.ZW_Tag) / 10.0;
+	"ZEN_MW".Umwelt_RM_ZW_Vortag := DINT_TO_REAL("DB96_ZW".Umwelt_RM.ZW_Vortag) / 10.0;
+	
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB1_Antriebe"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR 
+      ZykIdx : Int;
+      AntrMeld_chg_Idx : Int;
+      Imp_Sek_Init : Bool;
+      OP_Mgr : "FB60_OP_Mgr";
+      BB_G1 : "FB50_Antrieb";
+      BB_G2 : "FB50_Antrieb";
+      BB_G3 : "FB50_Antrieb";
+      BB_SHL_G1 : "FB50_Antrieb";
+      BB_SHL_G2 : "FB50_Antrieb";
+      BB_SHL_G3 : "FB50_Antrieb";
+      BB_AV : "FB50_Antrieb";
+      BB_LS1 : "FB50_Antrieb";
+      BB_LS2 : "FB50_Antrieb";
+      BB1_RZP1 : "FB50_Antrieb";
+      BB1_RZP2 : "FB50_Antrieb";
+      BB1_UeSP : "FB50_Antrieb";
+      BB1_AS1 : "FB50_Antrieb";
+      BB1_AS2 : "FB50_Antrieb";
+      BB1_SR1 : "FB50_Antrieb";
+      BB1_SR2 : "FB50_Antrieb";
+      BB2_RZP1 : "FB50_Antrieb";
+      BB2_RZP2 : "FB50_Antrieb";
+      BB2_UeSP : "FB50_Antrieb";
+      BB2_AS1 : "FB50_Antrieb";
+      BB2_AS2 : "FB50_Antrieb";
+      BB2_SR1 : "FB50_Antrieb";
+      BB2_SR2 : "FB50_Antrieb";
+      BB1_SR_K : "FB50_Antrieb";
+      Zulauf_AR_P1 : "FB50_Antrieb";
+      Zulauf_AR_P2 : "FB50_Antrieb";
+      Zulauf_AS : "FB50_Antrieb";
+      Zulauf_RA_SA : "FB50_Antrieb";
+      Zulauf_RA_HZS : "FB50_Antrieb";
+      Zulauf_RA_VKS : "FB50_Antrieb";
+      Zulauf_RA_V : "FB50_Antrieb";
+      Zulauf_RA_RP : "FB50_Antrieb";
+      Zulauf_RA_FP : "FB50_Antrieb";
+      Schlamm_BP : "FB50_Antrieb";
+      Truebwasser_P1 : "FB50_Antrieb";
+      Truebwasser_P2 : "FB50_Antrieb";
+      Schlamm_AS : "FB50_Antrieb";
+      BB2_SR_K : "FB50_Antrieb";
+      Zulauf_DosP : "FB50_Antrieb";
+      EA_Zulauf_DosP : "FB90_FU_CIM_EA";
+      EA_Kaeser_G1 : "FB91_FU_KAESER_EA";
+      EA_Kaeser_G2 : "FB91_FU_KAESER_EA";
+      EA_Kaeser_G3 : "FB91_FU_KAESER_EA";
+   END_VAR
+
+
+BEGIN
+	IF "Imp_Sek" AND NOT "Imp_Sek_Zyk" THEN
+	  #Imp_Sek_Init := 1;
+	END_IF;
+	
+	#ZykIdx := #ZykIdx + 1;
+	IF #ZykIdx > 39 THEN
+	    #ZykIdx := 1;
+	  "Imp_Sek_Zyk" := 0;
+	  IF #Imp_Sek_Init THEN
+	    "Imp_Sek_Zyk" := 1;
+	    #Imp_Sek_Init := 0;
+	  END_IF;
+	END_IF;
+	
+	
+	IF #ZykIdx = 1 THEN
+	    #EA_Kaeser_G1(DP_aktiv:="DB91_DP_aktiv".Tln[6],
+	                  EA_STD:="DB107_Antriebe_EA".BB_G1,
+	                  EA:="DB80_Peri_EA".Kaeser_G1,
+	                  MELD:="DB104_Antriebe_Meld".BB_G1);
+	     
+	    #BB_G1(Typ := 0,
+	           Idx := 0,
+	           EA := "DB107_Antriebe_EA".BB_G1,
+	           MELD := "DB104_Antriebe_Meld".BB_G1,
+	           BEF_UV := "DB108_Antriebe_Bef_UV".BB_G1,
+	           BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_G1,
+	           PRM := "DB106_Antriebe_Prm".BB_G1);
+	END_IF;
+	IF #ZykIdx = 2 THEN
+	    #EA_Kaeser_G2(DP_aktiv := "DB91_DP_aktiv".Tln[7],
+	                  EA_STD := "DB107_Antriebe_EA".BB_G2,
+	                  EA := "DB80_Peri_EA".Kaeser_G2,
+	                  MELD := "DB104_Antriebe_Meld".BB_G2);
+	    
+	    #BB_G2(Typ := 0,
+	           Idx := 1,
+	           EA := "DB107_Antriebe_EA".BB_G2,
+	           MELD := "DB104_Antriebe_Meld".BB_G2,
+	           BEF_UV := "DB108_Antriebe_Bef_UV".BB_G2,
+	           BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_G2,
+	           PRM := "DB106_Antriebe_Prm".BB_G2);
+	END_IF;
+	IF #ZykIdx = 3 THEN
+	    #EA_Kaeser_G3(DP_aktiv := "DB91_DP_aktiv".Tln[8],
+	                  EA_STD := "DB107_Antriebe_EA".BB_G3,
+	                  EA := "DB80_Peri_EA".Kaeser_G3,
+	                  MELD := "DB104_Antriebe_Meld".BB_G3);
+	    
+	    #BB_G3(Typ := 0,
+	           Idx := 2,
+	           EA := "DB107_Antriebe_EA".BB_G3,
+	           MELD := "DB104_Antriebe_Meld".BB_G3,
+	           BEF_UV := "DB108_Antriebe_Bef_UV".BB_G3,
+	           BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_G3,
+	           PRM := "DB106_Antriebe_Prm".BB_G3);
+	END_IF;
+	IF #ZykIdx = 4 THEN
+	    #BB_SHL_G1(Typ := 0,
+	               Idx := 3,
+	               EA := "DB107_Antriebe_EA".BB_SHL_G1,
+	               MELD := "DB104_Antriebe_Meld".BB_SHL_G1,
+	               BEF_UV := "DB108_Antriebe_Bef_UV".BB_SHL_G1,
+	               BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_SHL_G1,
+	               PRM := "DB106_Antriebe_Prm".BB_SHL_G1);
+	END_IF;
+	IF #ZykIdx = 5 THEN
+	    #BB_SHL_G2(Typ := 0,
+	               Idx := 4,
+	               EA := "DB107_Antriebe_EA".BB_SHL_G2,
+	               MELD := "DB104_Antriebe_Meld".BB_SHL_G2,
+	               BEF_UV := "DB108_Antriebe_Bef_UV".BB_SHL_G2,
+	               BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_SHL_G2,
+	               PRM := "DB106_Antriebe_Prm".BB_SHL_G2);
+	END_IF;
+	IF #ZykIdx = 6 THEN
+	    #BB_SHL_G3(Typ := 0,
+	               Idx := 5,
+	               EA := "DB107_Antriebe_EA".BB_SHL_G3,
+	               MELD := "DB104_Antriebe_Meld".BB_SHL_G3,
+	               BEF_UV := "DB108_Antriebe_Bef_UV".BB_SHL_G3,
+	               BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_SHL_G3,
+	               PRM := "DB106_Antriebe_Prm".BB_SHL_G3);
+	END_IF;
+	IF #ZykIdx = 7 THEN
+	    #BB_AV(Typ := 0,
+	           Idx := 6,
+	           EA := "DB107_Antriebe_EA".BB_AV,
+	           MELD := "DB104_Antriebe_Meld".BB_AV,
+	           BEF_UV := "DB108_Antriebe_Bef_UV".BB_AV,
+	           BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_AV,
+	           PRM := "DB106_Antriebe_Prm".BB_AV);
+	END_IF;
+	IF #ZykIdx = 8 THEN
+	    #BB_LS1(Typ := 5,
+	            Idx := 7,
+	            EA := "DB107_Antriebe_EA".BB_LS1,
+	            MELD := "DB104_Antriebe_Meld".BB_LS1,
+	            BEF_UV := "DB108_Antriebe_Bef_UV".BB_LS1,
+	            BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_LS1,
+	            PRM := "DB106_Antriebe_Prm".BB_LS1);
+	END_IF;
+	IF #ZykIdx = 9 THEN
+	    #BB_LS2(Typ := 5,
+	            Idx := 8,
+	            EA := "DB107_Antriebe_EA".BB_LS2,
+	            MELD := "DB104_Antriebe_Meld".BB_LS2,
+	            BEF_UV := "DB108_Antriebe_Bef_UV".BB_LS2,
+	            BEF_PLS := "DB105_Antriebe_Bef_PLS".BB_LS2,
+	            PRM := "DB106_Antriebe_Prm".BB_LS2);
+	END_IF;
+	IF #ZykIdx = 10 THEN
+	    #BB1_RZP1(Typ := 0,
+	              Idx := 9,
+	              EA := "DB107_Antriebe_EA".BB1_RZP1,
+	              MELD := "DB104_Antriebe_Meld".BB1_RZP1,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB1_RZP1,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_RZP1,
+	              PRM := "DB106_Antriebe_Prm".BB1_RZP1);
+	END_IF;
+	IF #ZykIdx = 11 THEN
+	    #BB1_RZP2(Typ := 0,
+	              Idx := 10,
+	              EA := "DB107_Antriebe_EA".BB1_RZP2,
+	              MELD := "DB104_Antriebe_Meld".BB1_RZP2,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB1_RZP2,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_RZP2,
+	              PRM := "DB106_Antriebe_Prm".BB1_RZP2);
+	END_IF;
+	IF #ZykIdx = 12 THEN
+	    #BB1_UeSP(Typ := 0,
+	              Idx := 11,
+	              EA := "DB107_Antriebe_EA".BB1_UeSP,
+	              MELD := "DB104_Antriebe_Meld".BB1_UeSP,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB1_UeSP,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_UeSP,
+	              PRM := "DB106_Antriebe_Prm".BB1_UeSP);
+	END_IF;
+	IF #ZykIdx = 13 THEN
+	    #BB1_AS1(Typ := 5,
+	             Idx := 12,
+	             EA := "DB107_Antriebe_EA".BB1_AS1,
+	             MELD := "DB104_Antriebe_Meld".BB1_AS1,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB1_AS1,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_AS1,
+	             PRM := "DB106_Antriebe_Prm".BB1_AS1);
+	END_IF;
+	IF #ZykIdx = 14 THEN
+	    #BB1_AS2(Typ := 5,
+	             Idx := 13,
+	             EA := "DB107_Antriebe_EA".BB1_AS2,
+	             MELD := "DB104_Antriebe_Meld".BB1_AS2,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB1_AS2,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_AS2,
+	             PRM := "DB106_Antriebe_Prm".BB1_AS2);
+	END_IF;
+	IF #ZykIdx = 15 THEN
+	    #BB1_SR1(Typ := 7,
+	             Idx := 14,
+	             EA := "DB107_Antriebe_EA".BB1_SR1,
+	             MELD := "DB104_Antriebe_Meld".BB1_SR1,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB1_SR1,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_SR1,
+	             PRM := "DB106_Antriebe_Prm".BB1_SR1);
+	END_IF;
+	IF #ZykIdx = 16 THEN
+	    #BB1_SR2(Typ := 7,
+	             Idx := 15,
+	             EA := "DB107_Antriebe_EA".BB1_SR2,
+	             MELD := "DB104_Antriebe_Meld".BB1_SR2,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB1_SR2,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_SR2,
+	             PRM := "DB106_Antriebe_Prm".BB1_SR2);
+	END_IF;
+	IF #ZykIdx = 17 THEN
+	    #BB2_RZP1(Typ := 0,
+	              Idx := 16,
+	              EA := "DB107_Antriebe_EA".BB2_RZP1,
+	              MELD := "DB104_Antriebe_Meld".BB2_RZP1,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB2_RZP1,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_RZP1,
+	              PRM := "DB106_Antriebe_Prm".BB2_RZP1);
+	END_IF;
+	IF #ZykIdx = 18 THEN
+	    #BB2_RZP2(Typ := 0,
+	              Idx := 17,
+	              EA := "DB107_Antriebe_EA".BB2_RZP2,
+	              MELD := "DB104_Antriebe_Meld".BB2_RZP2,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB2_RZP2,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_RZP2,
+	              PRM := "DB106_Antriebe_Prm".BB2_RZP2);
+	END_IF;
+	IF #ZykIdx = 19 THEN
+	    #BB2_UeSP(Typ := 0,
+	              Idx := 18,
+	              EA := "DB107_Antriebe_EA".BB2_UeSP,
+	              MELD := "DB104_Antriebe_Meld".BB2_UeSP,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB2_UeSP,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_UeSP,
+	              PRM := "DB106_Antriebe_Prm".BB2_UeSP);
+	END_IF;
+	IF #ZykIdx = 20 THEN
+	    #BB2_AS1(Typ := 5,
+	             Idx := 19,
+	             EA := "DB107_Antriebe_EA".BB2_AS1,
+	             MELD := "DB104_Antriebe_Meld".BB2_AS1,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB2_AS1,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_AS1,
+	             PRM := "DB106_Antriebe_Prm".BB2_AS1);
+	END_IF;
+	IF #ZykIdx = 21 THEN
+	    #BB2_AS2(Typ := 5,
+	             Idx := 20,
+	             EA := "DB107_Antriebe_EA".BB2_AS2,
+	             MELD := "DB104_Antriebe_Meld".BB2_AS2,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB2_AS2,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_AS2,
+	             PRM := "DB106_Antriebe_Prm".BB2_AS2);
+	END_IF;
+	IF #ZykIdx = 22 THEN
+	    #BB2_SR1(Typ := 7,
+	             Idx := 21,
+	             EA := "DB107_Antriebe_EA".BB2_SR1,
+	             MELD := "DB104_Antriebe_Meld".BB2_SR1,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB2_SR1,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_SR1,
+	             PRM := "DB106_Antriebe_Prm".BB2_SR1);
+	END_IF;
+	IF #ZykIdx = 23 THEN
+	    #BB2_SR2(Typ := 7,
+	             Idx := 22,
+	             EA := "DB107_Antriebe_EA".BB2_SR2,
+	             MELD := "DB104_Antriebe_Meld".BB2_SR2,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB2_SR2,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_SR2,
+	             PRM := "DB106_Antriebe_Prm".BB2_SR2);
+	END_IF;
+	IF #ZykIdx = 24 THEN
+	    #BB1_SR_K(Typ := 0,
+	             Idx := 23,
+	             EA := "DB107_Antriebe_EA".BB1_SR_K,
+	             MELD := "DB104_Antriebe_Meld".BB1_SR_K,
+	             BEF_UV := "DB108_Antriebe_Bef_UV".BB1_SR_K,
+	             BEF_PLS := "DB105_Antriebe_Bef_PLS".BB1_SR_K,
+	             PRM := "DB106_Antriebe_Prm".BB1_SR_K);
+	END_IF;
+	IF #ZykIdx = 25 THEN
+	    #Zulauf_AR_P1(Typ := 0,
+	                  Idx := 24,
+	                  EA := "DB107_Antriebe_EA".Zulauf_AR_P1,
+	                  MELD := "DB104_Antriebe_Meld".Zulauf_AR_P1,
+	                  BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_AR_P1,
+	                  BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_AR_P1,
+	                  PRM := "DB106_Antriebe_Prm".Zulauf_AR_P1);
+	END_IF;
+	IF #ZykIdx = 26 THEN
+	    #Zulauf_AR_P2(Typ := 0,
+	                  Idx := 25,
+	                  EA := "DB107_Antriebe_EA".Zulauf_AR_P2,
+	                  MELD := "DB104_Antriebe_Meld".Zulauf_AR_P2,
+	                  BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_AR_P2,
+	                  BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_AR_P2,
+	                  PRM := "DB106_Antriebe_Prm".Zulauf_AR_P2);
+	END_IF;
+	IF #ZykIdx = 27 THEN
+	    #Zulauf_AS(Typ := 5,
+	               Idx := 26,
+	               EA := "DB107_Antriebe_EA".Zulauf_AS,
+	               MELD := "DB104_Antriebe_Meld".Zulauf_AS,
+	               BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_AS,
+	               BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_AS,
+	               PRM := "DB106_Antriebe_Prm".Zulauf_AS);
+	END_IF;
+	IF #ZykIdx = 28 THEN
+	    #Zulauf_RA_SA(Typ := 0,
+	                  Idx := 27,
+	                  EA := "DB107_Antriebe_EA".Zulauf_RA_SA,
+	                  MELD := "DB104_Antriebe_Meld".Zulauf_RA_SA,
+	                  BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_RA_SA,
+	                  BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_RA_SA,
+	                  PRM := "DB106_Antriebe_Prm".Zulauf_RA_SA);
+	END_IF;
+	IF #ZykIdx = 29 THEN
+	    #Zulauf_RA_HZS(Typ := 0,
+	                   Idx := 28,
+	                   EA := "DB107_Antriebe_EA".Zulauf_RA_HZS,
+	                   MELD := "DB104_Antriebe_Meld".Zulauf_RA_HZS,
+	                   BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_RA_HZS,
+	                   BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_RA_HZS,
+	                   PRM := "DB106_Antriebe_Prm".Zulauf_RA_HZS);
+	END_IF;
+	IF #ZykIdx = 30 THEN
+	    #Zulauf_RA_VKS(Typ := 0,
+	                   Idx := 29,
+	                   EA := "DB107_Antriebe_EA".Zulauf_RA_VKS,
+	                   MELD := "DB104_Antriebe_Meld".Zulauf_RA_VKS,
+	                   BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_RA_VKS,
+	                   BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_RA_VKS,
+	                   PRM := "DB106_Antriebe_Prm".Zulauf_RA_VKS);
+	END_IF;
+	IF #ZykIdx = 31 THEN
+	    #Zulauf_RA_V(Typ := 0,
+	                 Idx := 30,
+	                 EA := "DB107_Antriebe_EA".Zulauf_RA_V,
+	                 MELD := "DB104_Antriebe_Meld".Zulauf_RA_V,
+	                 BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_RA_V,
+	                 BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_RA_V,
+	                 PRM := "DB106_Antriebe_Prm".Zulauf_RA_V);
+	END_IF;
+	IF #ZykIdx = 32 THEN
+	    #Zulauf_RA_RP(Typ := 0,
+	                  Idx := 31,
+	                  EA := "DB107_Antriebe_EA".Zulauf_RA_RP,
+	                  MELD := "DB104_Antriebe_Meld".Zulauf_RA_RP,
+	                  BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_RA_RP,
+	                  BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_RA_RP,
+	                  PRM := "DB106_Antriebe_Prm".Zulauf_RA_RP);
+	END_IF;
+	IF #ZykIdx = 33 THEN
+	    #Zulauf_RA_FP(Typ := 0,
+	                  Idx := 32,
+	                  EA := "DB107_Antriebe_EA".Zulauf_RA_FP,
+	                  MELD := "DB104_Antriebe_Meld".Zulauf_RA_FP,
+	                  BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_RA_FP,
+	                  BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_RA_FP,
+	                  PRM := "DB106_Antriebe_Prm".Zulauf_RA_FP);
+	END_IF;
+	IF #ZykIdx = 34 THEN
+	    #Schlamm_BP(Typ := 0,
+	                Idx := 33,
+	                EA := "DB107_Antriebe_EA".Schlamm_BP,
+	                MELD := "DB104_Antriebe_Meld".Schlamm_BP,
+	                BEF_UV := "DB108_Antriebe_Bef_UV".Schlamm_BP,
+	                BEF_PLS := "DB105_Antriebe_Bef_PLS".Schlamm_BP,
+	                PRM := "DB106_Antriebe_Prm".Schlamm_BP);
+	END_IF;
+	IF #ZykIdx = 35 THEN
+	    #Truebwasser_P1(Typ := 0,
+	                    Idx := 34,
+	                    EA := "DB107_Antriebe_EA".Truebwasser_P1,
+	                    MELD := "DB104_Antriebe_Meld".Truebwasser_P1,
+	                    BEF_UV := "DB108_Antriebe_Bef_UV".Truebwasser_P1,
+	                    BEF_PLS := "DB105_Antriebe_Bef_PLS".Truebwasser_P1,
+	                    PRM := "DB106_Antriebe_Prm".Truebwasser_P1);
+	END_IF;
+	IF #ZykIdx = 36 THEN
+	    #Truebwasser_P2(Typ := 0,
+	                    Idx := 35,
+	                    EA := "DB107_Antriebe_EA".Truebwasser_P2,
+	                    MELD := "DB104_Antriebe_Meld".Truebwasser_P2,
+	                    BEF_UV := "DB108_Antriebe_Bef_UV".Truebwasser_P2,
+	                    BEF_PLS := "DB105_Antriebe_Bef_PLS".Truebwasser_P2,
+	                    PRM := "DB106_Antriebe_Prm".Truebwasser_P2);
+	END_IF;
+	IF #ZykIdx = 37 THEN
+	    #Schlamm_AS(Typ := 5,
+	                Idx := 36,
+	                EA := "DB107_Antriebe_EA".Schlamm_AS,
+	                MELD := "DB104_Antriebe_Meld".Schlamm_AS,
+	                BEF_UV := "DB108_Antriebe_Bef_UV".Schlamm_AS,
+	                BEF_PLS := "DB105_Antriebe_Bef_PLS".Schlamm_AS,
+	                PRM := "DB106_Antriebe_Prm".Schlamm_AS);
+	END_IF;
+	IF #ZykIdx = 38 THEN
+	    #BB2_SR_K(Typ := 0,
+	              Idx := 37,
+	              EA := "DB107_Antriebe_EA".BB2_SR_K,
+	              MELD := "DB104_Antriebe_Meld".BB2_SR_K,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".BB2_SR_K,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".BB2_SR_K,
+	              PRM := "DB106_Antriebe_Prm".BB2_SR_K);
+	END_IF;
+	IF #ZykIdx = 39 THEN
+	    #Zulauf_DosP(Typ := 6,
+	              Idx := 38,
+	              EA := "DB107_Antriebe_EA".Zulauf_DosP,
+	              MELD := "DB104_Antriebe_Meld".Zulauf_DosP,
+	              BEF_UV := "DB108_Antriebe_Bef_UV".Zulauf_DosP,
+	              BEF_PLS := "DB105_Antriebe_Bef_PLS".Zulauf_DosP,
+	              PRM := "DB106_Antriebe_Prm".Zulauf_DosP);
+	 //"DB80_Peri_EA".Zulauf_DosP.E.STW.ActRemoteAccess := 1;
+	    #EA_Zulauf_DosP(DP_aktiv := "DB91_DP_aktiv".Tln[5],
+	                EA_STD := "DB107_Antriebe_EA".Zulauf_DosP,
+	                EA := "DB80_Peri_EA".Zulauf_DosP,
+	                MELD := "DB104_Antriebe_Meld".Zulauf_DosP);
+	 //"ZEN_MW".KAW_30_PM1_MW_NDr := "DB80_Peri_EA".Zulauf_DosP.E.MeasuredPressure;
+	 //"ZEN_MW".KAW_30_PM1_MW_DM := "DB80_Peri_EA".Zulauf_DosP.E.VolumeTotal;
+	END_IF;
+	
+	
+	#OP_Mgr();
+	"ZEN_Meld".ZEN_Bed_aktiv := ("DB92_OP_Data".activeUserGroup <> 0);
+	
+	"DB107_Antriebe_EA".BB_G1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB_G2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB_G3.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB_SHL_G1.E.Bed_Fern :=1;
+	"DB104_Antriebe_Meld".BB_SHL_G1.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".BB_SHL_G2.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".BB_SHL_G2.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".BB_SHL_G3.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".BB_SHL_G3.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".BB_AV.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".BB_AV.Status.Bed_NHV := 1;
+	
+	"DB107_Antriebe_EA".BB_LS1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB_LS2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_RZP1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_RZP2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_UeSP.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_AS1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_AS2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_SR1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB1_SR2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_RZP1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_RZP2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_UeSP.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_AS1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_AS2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_SR1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".BB2_SR2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".Zulauf_AR_P1.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".Zulauf_AR_P1.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_AR_P2.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".Zulauf_AR_P2.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_AS.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB104_Antriebe_Meld".Zulauf_AS.Status.Bed_NHV := 1;
+	
+	"DB107_Antriebe_EA".Zulauf_RA_SA.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".Zulauf_RA_SA.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_RA_HZS.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".Zulauf_RA_HZS.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_RA_VKS.E.Bed_Fern :=1;
+	"DB104_Antriebe_Meld".Zulauf_RA_VKS.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_RA_V.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".Zulauf_RA_V.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_RA_RP.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".Zulauf_RA_RP.Status.Bed_NHV := 1;
+	"DB107_Antriebe_EA".Zulauf_RA_FP.E.Bed_Fern :=1;
+	"DB104_Antriebe_Meld".Zulauf_RA_FP.Status.Bed_NHV := 1;
+	
+	"DB107_Antriebe_EA".Schlamm_BP.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".Truebwasser_P1.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	"DB107_Antriebe_EA".Truebwasser_P2.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	
+	"DB107_Antriebe_EA".BB1_SR_K.E.Bed_Fern := 1;
+	"DB107_Antriebe_EA".BB2_SR_K.E.Bed_Fern := 1;
+	"DB104_Antriebe_Meld".BB1_SR_K.Status.Bed_NHV := 1;
+	"DB104_Antriebe_Meld".BB2_SR_K.Status.Bed_NHV := 1;
+	
+	"DB107_Antriebe_EA".Zulauf_DosP.E.Bed_Fern := 1;
+	"DB107_Antriebe_EA".Zulauf_DosP.E.Bed_UV := "ZEN_Meld".ZEN_Bed_aktiv;
+	
+END_FUNCTION_BLOCK
+
+FUNCTION "Peripherie" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+	
+	IF "Freigabe_Peripherie" THEN
+	//lokale E/A - E    
+	    "ZEN_Meld".E_Zulauf_AR_P1_Ein :=   "E_Zulauf_AR_P1_Ein";
+	    "DB107_Antriebe_EA".Zulauf_AR_P1.E.Ein :=   "E_Zulauf_AR_P1_Ein";
+	    "ZEN_Meld".E_Zulauf_AR_P1_St :=   "E_Zulauf_AR_P1_St";
+	    "DB107_Antriebe_EA".Zulauf_AR_P1.E.St :=   "E_Zulauf_AR_P1_St";
+	    "ZEN_Meld".E_Zulauf_AR_SS :=   "E_Zulauf_AR_SS";
+	    "ZEN_Meld".E_Zulauf_AR_P2_Ein :=   "E_Zulauf_AR_P2_Ein";
+	    "DB107_Antriebe_EA".Zulauf_AR_P2.E.Ein :=   "E_Zulauf_AR_P2_Ein";
+	    "ZEN_Meld".E_Zulauf_AR_P2_St :=   "E_Zulauf_AR_P2_St";
+	    "DB107_Antriebe_EA".Zulauf_AR_P2.E.St :=   "E_Zulauf_AR_P2_St";
+	    "ZEN_Meld".E_Zulauf_AR_HW :=   "E_Zulauf_AR_HW";
+	    "ZEN_Meld".E_Zulauf_AR_Niv_St :=   "E_Zulauf_AR_Niv_St";
+	    "DB117_MW_EA".Zulauf_AR_Niv.E.St :=   "E_Zulauf_AR_Niv_St";
+	    "ZEN_Meld".E_Zulauf_AR_DF_ZI :=   "E_Zulauf_AR_DF_ZI";
+	    "DB117_MW_EA".Zulauf_AR_DF.E.ZI :=   "E_Zulauf_AR_DF_ZI";
+	    "DB96_ZW".Zulauf_AR_DF.Impuls := "E_Zulauf_AR_DF_ZI";
+	    "ZEN_Meld".E_Zulauf_AR_DF_St :=   "E_Zulauf_AR_DF_St";
+	    "DB117_MW_EA".Zulauf_AR_DF.E.St :=   "E_Zulauf_AR_DF_St";
+	    "ZEN_Meld".E_Ablauf_pH_St := "E_Ablauf_pH_St";
+	    "DB117_MW_EA".Ablauf_pH.E.St := "E_Ablauf_pH_St";
+	    "ZEN_Meld".E_Ablauf_O2_St := "E_Ablauf_O2_St";
+	    "DB117_MW_EA".Ablauf_O2.E.St := "E_Ablauf_O2_St";
+	    "ZEN_Meld".E_Ablauf_DF_ZI := "E_Ablauf_DF_ZI";
+	    "DB117_MW_EA".Ablauf_DF.E.ZI := "E_Ablauf_DF_ZI";
+	    "DB96_ZW".Ablauf_DF.Impuls := "E_Ablauf_DF_ZI";
+	    "ZEN_Meld".E_Ablauf_DF_St := "E_Ablauf_DF_St";
+	    "DB117_MW_EA".Ablauf_DF.E.St := "E_Ablauf_DF_St";
+	    "ZEN_Meld".E_BB_UeSS_DF_ZI := "E_BB_UeSS_DF_ZI";
+	    "DB117_MW_EA".BB_UeSS_DF.E.ZI := "E_BB_UeSS_DF_ZI";
+	    "DB96_ZW".BB_UeSS_DF.Impuls := "E_BB_UeSS_DF_ZI";
+	    
+	    "ZEN_Meld".E_ZEN_Res_1_7 :=   "E_ZEN_Res_1_7";
+	    "ZEN_Meld".E_NSHV_SS1_St := false AND  "E_NSHV_SS1_St";
+	    "ZEN_Meld".E_NSHV_SS2_St := false AND  "E_NSHV_SS2_St";
+	    "ZEN_Meld".E_NSHV_N02_AF_St := NOT  "E_NSHV_N02_AF_St";
+	    "ZEN_Meld".E_NSHV_N03_AF_St :=false AND  "E_NSHV_N03_AF_St";
+	    "ZEN_Meld".E_NSHV_N04_AF_St := false AND  "E_NSHV_N04_AF_St";
+	    "ZEN_Meld".E_NSHV_LS_Aus :=  NOT "E_NSHV_LS_Ein";
+	    "ZEN_Meld".E_NSHV_LS_St :=  "E_NSHV_LS_St";
+	    "ZEN_Meld".E_NSHV_NA := NOT  "E_NSHV_NA";
+	    "ZEN_Meld".E_ZEN_Res_3_0 :=   "E_ZEN_Res_3_0";
+	    "DB96_ZW".Umwelt_RM.Impuls := "E_ZEN_Res_3_0";
+	    "ZEN_Meld".E_ZEN_Res_3_1 :=   "E_ZEN_Res_3_1";
+	    "ZEN_Meld".E_ZEN_Res_3_2 :=   "E_ZEN_Res_3_2";
+	    "ZEN_Meld".E_ZEN_Res_3_3 :=   "E_ZEN_Res_3_3";
+	    "ZEN_Meld".E_ZEN_Res_3_4 :=   "E_ZEN_Res_3_4";
+	    "ZEN_Meld".E_ZEN_Res_3_5 :=   "E_ZEN_Res_3_5";
+	    "ZEN_Meld".E_ZEN_Res_3_6 :=   "E_ZEN_Res_3_6";
+	    "ZEN_Meld".E_ZEN_Res_3_7 :=   "E_ZEN_Res_3_7";
+	    
+	//lokale E/A - EW   
+	    "ZEN_EA".EW_Zulauf_AR_Niv := "EW_Zulauf_AR_Niv";
+	    "DB117_MW_EA".Zulauf_AR_Niv.EW_Peri :=   "EW_Zulauf_AR_Niv";
+	    "ZEN_EA".EW_Zulauf_AR_Temp := "EW_Zulauf_AR_Temp";
+	    "DB117_MW_EA".Zulauf_AR_Temp.EW_Peri := W#16#1599;
+	    "ZEN_EA".EW_Zulauf_AR_DF := "EW_Zulauf_AR_DF";
+	    "DB117_MW_EA".Zulauf_AR_DF.EW_Peri :=   "EW_Zulauf_AR_DF";
+	    "ZEN_EA".EW_Ablauf_DF := "EW_Ablauf_DF";
+	    "ZEN_EA".EW_Ablauf_pH := "EW_Ablauf_pH";
+	    "ZEN_EA".EW_Ablauf_O2 := "EW_Ablauf_O2";
+	    "ZEN_EA".EW_Ablauf_Temp := "EW_Ablauf_Temp";
+	    "ZEN_EA".EW_BB_UeSS_DF := "EW_BB_UeSS_DF";
+	    "DB117_MW_EA".BB_UeSS_DF.EW_Peri := "EW_BB_UeSS_DF";
+	    "DB117_MW_EA".Ablauf_DF.EW_Peri := "EW_Ablauf_DF";
+	    "DB117_MW_EA".Ablauf_pH.EW_Peri := "EW_Ablauf_pH";
+	    "DB117_MW_EA".Ablauf_O2.EW_Peri := "EW_Ablauf_O2";
+	    "DB117_MW_EA".Ablauf_Temp.EW_Peri := "EW_Ablauf_Temp";
+	    
+	    "ZEN_EA".EW_Zulauf_DF := "EW_Zulauf_DF";
+	    "DB117_MW_EA".Zulauf_DF.EW_Peri := "EW_Zulauf_DF";
+	    "ZEN_Meld".E_Zulauf_DF_ZI := "E_Zulauf_DF_ZI";
+	    "DB117_MW_EA".Zulauf_DF.E.ZI := "E_Zulauf_DF_ZI";
+	    "DB96_ZW".Zulauf_DF.Impuls := "E_Zulauf_DF_ZI";
+	    
+	    "ZEN_EA".EW_Zulauf_Niv := "EW_Zulauf_Niv";
+	    "DB117_MW_EA".Zulauf_Niv.EW_Peri := "EW_Zulauf_Niv";
+	    "ZEN_EA".EW_Verteiler_pH := "EW_Verteiler_pH";
+	    "DB117_MW_EA".Verteiler_pH.EW_Peri := "EW_Verteiler_pH";
+	    "ZEN_EA".EW_Verteiler_O2 := "EW_Verteiler_O2";
+	    "DB117_MW_EA".Verteiler_O2.EW_Peri :="EW_Verteiler_O2";
+	    "ZEN_EA".EW_Zulauf_SF_Niv := "EW_Zulauf_SF_Niv";
+	    "DB117_MW_EA".Zulauf_SF_Niv.EW_Peri := W#16#1599;
+	    "ZEN_EA".EW_Verteiler_Temp := "EW_Verteiler_Temp";
+	    "DB117_MW_EA".Verteiler_Temp.EW_Peri := "EW_Verteiler_Temp";
+	    
+	END_IF;
+	
+	//dezentrale Peripherie - Teilnehmer 3  
+	IF "DB91_DP_aktiv".Tln[3] THEN
+	    "ZEN_Meld".E_BB_G1_Ein :=   "E_BB_G1_Ein";
+	    "DB107_Antriebe_EA".BB_G1.E.Ein :=   "E_BB_G1_Ein";
+	    "ZEN_Meld".E_BB_G1_St :=  NOT "E_BB_G1_St";
+	    "DB107_Antriebe_EA".BB_G1.E.St :=  NOT "E_BB_G1_St";
+	    "ZEN_Meld".E_BB_G1_Bed_vOrt :=   "E_BB_G1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB_G1.E.Bed_vOrt :=   "E_BB_G1_Bed_vOrt";
+	    "ZEN_Meld".E_BB_G1_Bed_Fern :=   "E_BB_G1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB_G1.E.Bed_Fern :=   "E_BB_G1_Bed_Fern";
+	    "ZEN_Meld".E_BB_G1_AF_St := NOT  "E_BB_G1_AF_St";
+	    "DB107_Antriebe_EA".BB_G1.E.AF_St := NOT  "E_BB_G1_AF_St";
+	    "ZEN_Meld".E_BB_SHL_G1_Ein :=   "E_BB_SHL_G1_Ein";
+	    "DB107_Antriebe_EA".BB_SHL_G1.E.Ein :=   "E_BB_SHL_G1_Ein";
+	    "ZEN_Meld".E_BB_SHL_G1_St :=  NOT "E_BB_SHL_G1_St";
+	    "DB107_Antriebe_EA".BB_SHL_G1.E.St :=  NOT "E_BB_SHL_G1_St";
+	    "ZEN_Meld".E_BB_G2_Ein :=   "E_BB_G2_Ein";
+	    "DB107_Antriebe_EA".BB_G2.E.Ein :=   "E_BB_G2_Ein";
+	    "ZEN_Meld".E_BB_G2_St :=  NOT "E_BB_G2_St";
+	    "DB107_Antriebe_EA".BB_G2.E.St :=  NOT "E_BB_G2_St";
+	    "ZEN_Meld".E_BB_G2_Bed_vOrt :=   "E_BB_G2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB_G2.E.Bed_vOrt :=   "E_BB_G2_Bed_vOrt";
+	    "ZEN_Meld".E_BB_G2_Bed_Fern :=   "E_BB_G2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB_G2.E.Bed_Fern :=   "E_BB_G2_Bed_Fern";
+	    "ZEN_Meld".E_BB_G2_AF_St := NOT  "E_BB_G2_AF_St";
+	    "DB107_Antriebe_EA".BB_G2.E.AF_St := NOT  "E_BB_G2_AF_St";
+	    "ZEN_Meld".E_BB_SHL_G2_Ein :=   "E_BB_SHL_G2_Ein";
+	    "DB107_Antriebe_EA".BB_SHL_G2.E.Ein :=   "E_BB_SHL_G2_Ein";
+	    "ZEN_Meld".E_BB_SHL_G2_St :=  NOT "E_BB_SHL_G2_St";
+	    "DB107_Antriebe_EA".BB_SHL_G2.E.St :=  NOT "E_BB_SHL_G2_St";
+	    "ZEN_Meld".E_BB_G3_Ein :=   "E_BB_G3_Ein";
+	    "DB107_Antriebe_EA".BB_G3.E.Ein :=   "E_BB_G3_Ein";
+	    "ZEN_Meld".E_BB_G3_St := NOT  "E_BB_G3_St";
+	    "DB107_Antriebe_EA".BB_G3.E.St := NOT  "E_BB_G3_St";
+	    "ZEN_Meld".E_BB_G3_Bed_vOrt :=   "E_BB_G3_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB_G3.E.Bed_vOrt :=   "E_BB_G3_Bed_vOrt";
+	    "ZEN_Meld".E_BB_G3_Bed_Fern :=   "E_BB_G3_Bed_Fern";
+	    "DB107_Antriebe_EA".BB_G3.E.Bed_Fern :=   "E_BB_G3_Bed_Fern";
+	    "ZEN_Meld".E_BB_G3_AF_St := NOT  "E_BB_G3_AF_St";
+	    "DB107_Antriebe_EA".BB_G3.E.AF_St := NOT  "E_BB_G3_AF_St";
+	    "ZEN_Meld".E_BB_SHL_G3_Ein :=   "E_BB_SHL_G3_Ein";
+	    "DB107_Antriebe_EA".BB_SHL_G3.E.Ein :=   "E_BB_SHL_G3_Ein";
+	    "ZEN_Meld".E_BB_SHL_G3_St :=  NOT "E_BB_SHL_G3_St";
+	    "DB107_Antriebe_EA".BB_SHL_G3.E.St := NOT  "E_BB_SHL_G3_St";
+	    "ZEN_Meld".E_BB_AV_Ein :=   "E_BB_AV_Ein";
+	    "DB107_Antriebe_EA".BB_AV.E.Ein :=   "E_BB_AV_Ein";
+	    "ZEN_Meld".E_BB_AV_St :=  NOT "E_BB_AV_St";
+	    "DB107_Antriebe_EA".BB_AV.E.St :=  NOT "E_BB_AV_St";
+	    "ZEN_Meld".E_BB_AV_AF_St := NOT  "E_BB_AV_AF_St";
+	    "DB107_Antriebe_EA".BB_AV.E.AF_St := NOT  "E_BB_AV_AF_St";
+	    "ZEN_Meld".E_BB_RT :=   "E_BB_RT";
+	    "ZEN_Meld".E_BB1_SR_K_Ein :=  "E_BB1_SR_K_Ein";
+	    "DB107_Antriebe_EA".BB1_SR_K.E.Ein := "E_BB1_SR_K_Ein";
+	    "ZEN_Meld".E_BB1_SR_K_St := NOT "E_BB1_SR_K_St";
+	    "DB107_Antriebe_EA".BB1_SR_K.E.St := NOT "E_BB1_SR_K_St";
+	    "ZEN_Meld".E_BB1_SR_K_AF_St := NOT  "E_BB1_SR_K_AF_St";
+	    "DB107_Antriebe_EA".BB1_SR_K.E.AF_St := NOT  "E_BB1_SR_K_AF_St";
+	    "ZEN_Meld".E_BB_LS1_EA :=   "E_BB_LS1_EA";
+	    "DB107_Antriebe_EA".BB_LS1.E.EA :=   "E_BB_LS1_EA";
+	    "ZEN_Meld".E_BB_LS1_EZ :=   "E_BB_LS1_EZ";
+	    "DB107_Antriebe_EA".BB_LS1.E.EZ :=   "E_BB_LS1_EZ";
+	    "ZEN_Meld".E_BB_LS1_St := NOT  "E_BB_LS1_St";
+	    "DB107_Antriebe_EA".BB_LS1.E.St := NOT  "E_BB_LS1_St";
+	    "ZEN_Meld".E_BB_LS1_Bed_vOrt :=   "E_BB_LS1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB_LS1.E.Bed_vOrt :=   "E_BB_LS1_Bed_vOrt";
+	    "ZEN_Meld".E_BB_LS1_Bed_Fern :=   "E_BB_LS1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB_LS1.E.Bed_Fern :=   "E_BB_LS1_Bed_Fern";
+	    "ZEN_Meld".E_BB_LS1_AF_St := NOT  "E_BB_LS1_AF_St";
+	    "DB107_Antriebe_EA".BB_LS1.E.AF_St := NOT  "E_BB_LS1_AF_St";
+	    "ZEN_Meld".E_BB_LS2_EA :=   "E_BB_LS2_EA";
+	    "DB107_Antriebe_EA".BB_LS2.E.EA :=   "E_BB_LS2_EA";
+	    "ZEN_Meld".E_BB_LS2_EZ :=   "E_BB_LS2_EZ";
+	    "DB107_Antriebe_EA".BB_LS2.E.EZ :=   "E_BB_LS2_EZ";
+	    "ZEN_Meld".E_BB_LS2_St :=  NOT "E_BB_LS2_St";
+	    "DB107_Antriebe_EA".BB_LS2.E.St :=  NOT "E_BB_LS2_St";
+	    "ZEN_Meld".E_BB_LS2_Bed_vOrt :=   "E_BB_LS2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB_LS2.E.Bed_vOrt :=   "E_BB_LS2_Bed_vOrt";
+	    "ZEN_Meld".E_BB_LS2_Bed_Fern :=   "E_BB_LS2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB_LS2.E.Bed_Fern :=   "E_BB_LS2_Bed_Fern";
+	    "ZEN_Meld".E_BB_LS2_AF_St := NOT  "E_BB_LS2_AF_St";
+	    "DB107_Antriebe_EA".BB_LS2.E.AF_St := NOT  "E_BB_LS2_AF_St";
+	    "ZEN_Meld".E_BB1_RZP1_Ein :=   "E_BB1_RZP1_Ein";
+	    "DB107_Antriebe_EA".BB1_RZP1.E.Ein :=   "E_BB1_RZP1_Ein";
+	    "ZEN_Meld".E_BB1_RZP1_St :=  NOT "E_BB1_RZP1_St";
+	    "DB107_Antriebe_EA".BB1_RZP1.E.St :=  NOT "E_BB1_RZP1_St";
+	    "ZEN_Meld".E_BB1_RZP1_Bed_vOrt :=   "E_BB1_RZP1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_RZP1.E.Bed_vOrt :=   "E_BB1_RZP1_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_RZP1_Bed_Fern :=   "E_BB1_RZP1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_RZP1.E.Bed_Fern :=   "E_BB1_RZP1_Bed_Fern";
+	    "ZEN_Meld".E_BB1_RZP1_AF_St := NOT  "E_BB1_RZP1_AF_St";
+	    "DB107_Antriebe_EA".BB1_RZP1.E.AF_St := NOT  "E_BB1_RZP1_AF_St";
+	    "ZEN_Meld".E_BB1_RZP2_Ein :=   "E_BB1_RZP2_Ein";
+	    "DB107_Antriebe_EA".BB1_RZP2.E.Ein :=   "E_BB1_RZP2_Ein";
+	    "ZEN_Meld".E_BB1_RZP2_St :=  NOT "E_BB1_RZP2_St";
+	    "DB107_Antriebe_EA".BB1_RZP2.E.St :=  NOT "E_BB1_RZP2_St";
+	    "ZEN_Meld".E_BB1_RZP2_Bed_vOrt :=   "E_BB1_RZP2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_RZP2.E.Bed_vOrt :=   "E_BB1_RZP2_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_RZP2_Bed_Fern :=   "E_BB1_RZP2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_RZP2.E.Bed_Fern :=   "E_BB1_RZP2_Bed_Fern";
+	    "ZEN_Meld".E_BB1_RZP2_AF_St := NOT  "E_BB1_RZP2_AF_St";
+	    "DB107_Antriebe_EA".BB1_RZP2.E.AF_St := NOT  "E_BB1_RZP2_AF_St";
+	    "ZEN_Meld".E_BB1_UeSP_Ein :=   "E_BB1_UeSP_Ein";
+	    "DB107_Antriebe_EA".BB1_UeSP.E.Ein :=   "E_BB1_UeSP_Ein";
+	    "ZEN_Meld".E_BB1_UeSP_St := NOT  "E_BB1_UeSP_St";
+	    "DB107_Antriebe_EA".BB1_UeSP.E.St :=  NOT "E_BB1_UeSP_St";
+	    "ZEN_Meld".E_BB1_UeSP_Bed_vOrt :=   "E_BB1_UeSP_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_UeSP.E.Bed_vOrt :=   "E_BB1_UeSP_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_UeSP_Bed_Fern :=   "E_BB1_UeSP_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_UeSP.E.Bed_Fern :=   "E_BB1_UeSP_Bed_Fern";
+	    "ZEN_Meld".E_BB1_UeSP_AF_St := NOT  "E_BB1_UeSP_AF_St";
+	    "DB107_Antriebe_EA".BB1_UeSP.E.AF_St := NOT  "E_BB1_UeSP_AF_St";
+	    "ZEN_Meld".E_BB1_AS1_EA :=   "E_BB1_AS1_EA";
+	    "DB107_Antriebe_EA".BB1_AS1.E.EA :=   "E_BB1_AS1_EA";
+	    "ZEN_Meld".E_BB1_AS1_EZ :=   "E_BB1_AS1_EZ";
+	    "DB107_Antriebe_EA".BB1_AS1.E.EZ :=   "E_BB1_AS1_EZ";
+	    "ZEN_Meld".E_BB1_AS1_St :=  NOT "E_BB1_AS1_St";
+	    "DB107_Antriebe_EA".BB1_AS1.E.St := NOT  "E_BB1_AS1_St";
+	    "ZEN_Meld".E_BB1_AS1_Bed_vOrt :=   "E_BB1_AS1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_AS1.E.Bed_vOrt :=   "E_BB1_AS1_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_AS1_Bed_Fern :=   "E_BB1_AS1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_AS1.E.Bed_Fern :=   "E_BB1_AS1_Bed_Fern";
+	    "ZEN_Meld".E_BB1_AS1_AF_St := NOT  "E_BB1_AS1_AF_St";
+	    "DB107_Antriebe_EA".BB1_AS1.E.AF_St := NOT  "E_BB1_AS1_AF_St";
+	    "ZEN_Meld".E_BB1_AS2_EA :=   "E_BB1_AS2_EA";
+	    "DB107_Antriebe_EA".BB1_AS2.E.EA :=   "E_BB1_AS2_EA";
+	    "ZEN_Meld".E_BB1_AS2_EZ :=   "E_BB1_AS2_EZ";
+	    "DB107_Antriebe_EA".BB1_AS2.E.EZ :=   "E_BB1_AS2_EZ";
+	    "ZEN_Meld".E_BB1_AS2_St := NOT  "E_BB1_AS2_St";
+	    "DB107_Antriebe_EA".BB1_AS2.E.St := NOT  "E_BB1_AS2_St";
+	    "ZEN_Meld".E_BB1_AS2_Bed_vOrt :=   "E_BB1_AS2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_AS2.E.Bed_vOrt :=   "E_BB1_AS2_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_AS2_Bed_Fern :=   "E_BB1_AS2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_AS2.E.Bed_Fern :=   "E_BB1_AS2_Bed_Fern";
+	    "ZEN_Meld".E_BB1_AS2_AF_St := NOT  "E_BB1_AS2_AF_St";
+	    "DB107_Antriebe_EA".BB1_AS2.E.AF_St := NOT  "E_BB1_AS2_AF_St";
+	    "ZEN_Meld".E_BB1_SR1_Anst :=   "E_BB1_SR1_Anst";
+	    "DB107_Antriebe_EA".BB1_SR1.E.Anst :=   "E_BB1_SR1_Anst";
+	    "ZEN_Meld".E_BB1_SR1_Bed_vOrt :=   "E_BB1_SR1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_SR1.E.Bed_vOrt :=   "E_BB1_SR1_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_SR1_Bed_Fern :=   "E_BB1_SR1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_SR1.E.Bed_Fern :=   "E_BB1_SR1_Bed_Fern";
+	    "ZEN_Meld".E_BB1_SR1_AF_St := NOT  "E_BB1_SR1_AF_St";
+	    "DB107_Antriebe_EA".BB1_SR1.E.AF_St := NOT  "E_BB1_SR1_AF_St";
+	    "ZEN_Meld".E_BB1_SR2_Anst :=   "E_BB1_SR2_Anst";
+	    "DB107_Antriebe_EA".BB1_SR2.E.Anst :=   "E_BB1_SR2_Anst";
+	    "ZEN_Meld".E_BB1_SR2_Bed_vOrt :=   "E_BB1_SR2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB1_SR2.E.Bed_vOrt :=   "E_BB1_SR2_Bed_vOrt";
+	    "ZEN_Meld".E_BB1_SR2_Bed_Fern :=   "E_BB1_SR2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB1_SR2.E.Bed_Fern :=   "E_BB1_SR2_Bed_Fern";
+	    "ZEN_Meld".E_BB1_SR2_AF_St := NOT  "E_BB1_SR2_AF_St";
+	    "DB107_Antriebe_EA".BB1_SR2.E.AF_St := NOT  "E_BB1_SR2_AF_St";
+	    "ZEN_Meld".E_BB1_O2_St :=   "E_BB1_O2_St";
+	    "DB117_MW_EA".BB1_O2.E.St :=   "E_BB1_O2_St";
+	    "ZEN_Meld".E_BB1_DF_ZI :=   "E_BB1_DF_ZI";
+	    "DB117_MW_EA".BB1_DF.E.ZI :=   "E_BB1_DF_ZI";
+	    "ZEN_Meld".E_BB1_DF_St :=   "E_BB1_DF_St";
+	    "DB117_MW_EA".BB1_DF.E.St :=   "E_BB1_DF_St";
+	    "ZEN_Meld".E_BB2_RZP1_Ein :=   "E_BB2_RZP1_Ein";
+	    "DB107_Antriebe_EA".BB2_RZP1.E.Ein :=   "E_BB2_RZP1_Ein";
+	    "ZEN_Meld".E_BB2_RZP1_St := NOT  "E_BB2_RZP1_St";
+	    "DB107_Antriebe_EA".BB2_RZP1.E.St :=  NOT "E_BB2_RZP1_St";
+	    "ZEN_Meld".E_BB2_RZP1_Bed_vOrt :=   "E_BB2_RZP1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_RZP1.E.Bed_vOrt :=   "E_BB2_RZP1_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_RZP1_Bed_Fern :=   "E_BB2_RZP1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_RZP1.E.Bed_Fern :=   "E_BB2_RZP1_Bed_Fern";
+	    "ZEN_Meld".E_BB2_RZP1_AF_St := NOT  "E_BB2_RZP1_AF_St";
+	    "DB107_Antriebe_EA".BB2_RZP1.E.AF_St := NOT  "E_BB2_RZP1_AF_St";
+	    "ZEN_Meld".E_BB2_RZP2_Ein :=   "E_BB2_RZP2_Ein";
+	    "DB107_Antriebe_EA".BB2_RZP2.E.Ein :=   "E_BB2_RZP2_Ein";
+	    "ZEN_Meld".E_BB2_RZP2_St := NOT  "E_BB2_RZP2_St";
+	    "DB107_Antriebe_EA".BB2_RZP2.E.St := NOT  "E_BB2_RZP2_St";
+	    "ZEN_Meld".E_BB2_RZP2_Bed_vOrt :=   "E_BB2_RZP2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_RZP2.E.Bed_vOrt :=   "E_BB2_RZP2_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_RZP2_Bed_Fern :=   "E_BB2_RZP2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_RZP2.E.Bed_Fern :=   "E_BB2_RZP2_Bed_Fern";
+	    "ZEN_Meld".E_BB2_RZP2_AF_St := NOT  "E_BB2_RZP2_AF_St";
+	    "DB107_Antriebe_EA".BB2_RZP2.E.AF_St := NOT  "E_BB2_RZP2_AF_St";
+	    "ZEN_Meld".E_BB2_UeSP_Ein :=   "E_BB2_UeSP_Ein";
+	    "DB107_Antriebe_EA".BB2_UeSP.E.Ein :=   "E_BB2_UeSP_Ein";
+	    "ZEN_Meld".E_BB2_UeSP_St :=  NOT "E_BB2_UeSP_St";
+	    "DB107_Antriebe_EA".BB2_UeSP.E.St :=  NOT "E_BB2_UeSP_St";
+	    "ZEN_Meld".E_BB2_UeSP_Bed_vOrt :=   "E_BB2_UeSP_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_UeSP.E.Bed_vOrt :=   "E_BB2_UeSP_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_UeSP_Bed_Fern :=   "E_BB2_UeSP_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_UeSP.E.Bed_Fern :=   "E_BB2_UeSP_Bed_Fern";
+	    "ZEN_Meld".E_BB2_UeSP_AF_St := NOT  "E_BB2_UeSP_AF_St";
+	    "DB107_Antriebe_EA".BB2_UeSP.E.AF_St := NOT  "E_BB2_UeSP_AF_St";
+	    "ZEN_Meld".E_BB2_AS1_EA :=   "E_BB2_AS1_EA";
+	    "DB107_Antriebe_EA".BB2_AS1.E.EA :=   "E_BB2_AS1_EA";
+	    "ZEN_Meld".E_BB2_AS1_EZ :=   "E_BB2_AS1_EZ";
+	    "DB107_Antriebe_EA".BB2_AS1.E.EZ :=   "E_BB2_AS1_EZ";
+	    "ZEN_Meld".E_BB2_AS1_St :=  NOT "E_BB2_AS1_St";
+	    "DB107_Antriebe_EA".BB2_AS1.E.St :=  NOT "E_BB2_AS1_St";
+	    "ZEN_Meld".E_BB2_AS1_Bed_vOrt :=   "E_BB2_AS1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_AS1.E.Bed_vOrt :=   "E_BB2_AS1_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_AS1_Bed_Fern :=   "E_BB2_AS1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_AS1.E.Bed_Fern :=   "E_BB2_AS1_Bed_Fern";
+	    "ZEN_Meld".E_BB2_AS1_AF_St := NOT  "E_BB2_AS1_AF_St";
+	    "DB107_Antriebe_EA".BB2_AS1.E.AF_St := NOT  "E_BB2_AS1_AF_St";
+	    "ZEN_Meld".E_BB2_AS2_EA :=   "E_BB2_AS2_EA";
+	    "DB107_Antriebe_EA".BB2_AS2.E.EA :=   "E_BB2_AS2_EA";
+	    "ZEN_Meld".E_BB2_AS2_EZ :=   "E_BB2_AS2_EZ";
+	    "DB107_Antriebe_EA".BB2_AS2.E.EZ :=   "E_BB2_AS2_EZ";
+	    "ZEN_Meld".E_BB2_AS2_St := NOT  "E_BB2_AS2_St";
+	    "DB107_Antriebe_EA".BB2_AS2.E.St := NOT  "E_BB2_AS2_St";
+	    "ZEN_Meld".E_BB2_AS2_Bed_vOrt :=   "E_BB2_AS2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_AS2.E.Bed_vOrt :=   "E_BB2_AS2_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_AS2_Bed_Fern :=   "E_BB2_AS2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_AS2.E.Bed_Fern :=   "E_BB2_AS2_Bed_Fern";
+	    "ZEN_Meld".E_BB2_AS2_AF_St := NOT  "E_BB2_AS2_AF_St";
+	    "DB107_Antriebe_EA".BB2_AS2.E.AF_St := NOT  "E_BB2_AS2_AF_St";
+	    "ZEN_Meld".E_BB2_SR1_Anst :=   "E_BB2_SR1_Anst";
+	    "DB107_Antriebe_EA".BB2_SR1.E.Anst :=   "E_BB2_SR1_Anst";
+	    "ZEN_Meld".E_BB2_SR1_Bed_vOrt :=   "E_BB2_SR1_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_SR1.E.Bed_vOrt :=   "E_BB2_SR1_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_SR1_Bed_Fern :=   "E_BB2_SR1_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_SR1.E.Bed_Fern :=   "E_BB2_SR1_Bed_Fern";
+	    "ZEN_Meld".E_BB2_SR1_AF_St := NOT  "E_BB2_SR1_AF_St";
+	    "DB107_Antriebe_EA".BB2_SR1.E.AF_St := NOT  "E_BB2_SR1_AF_St";
+	    "ZEN_Meld".E_BB2_SR2_Anst :=   "E_BB2_SR2_Anst";
+	    "DB107_Antriebe_EA".BB2_SR2.E.Anst :=   "E_BB2_SR2_Anst";
+	    "ZEN_Meld".E_BB2_SR2_Bed_vOrt :=   "E_BB2_SR2_Bed_vOrt";
+	    "DB107_Antriebe_EA".BB2_SR2.E.Bed_vOrt :=   "E_BB2_SR2_Bed_vOrt";
+	    "ZEN_Meld".E_BB2_SR2_Bed_Fern :=   "E_BB2_SR2_Bed_Fern";
+	    "DB107_Antriebe_EA".BB2_SR2.E.Bed_Fern :=   "E_BB2_SR2_Bed_Fern";
+	    "ZEN_Meld".E_BB2_SR2_AF_St := NOT  "E_BB2_SR2_AF_St";
+	    "DB107_Antriebe_EA".BB2_SR2.E.AF_St := NOT  "E_BB2_SR2_AF_St";
+	    "ZEN_Meld".E_BB2_O2_St :=   "E_BB2_O2_St";
+	    "DB117_MW_EA".BB2_O2.E.St :=   "E_BB2_O2_St";
+	    "ZEN_Meld".E_BB2_DF_ZI :=   "E_BB2_DF_ZI";
+	    "DB117_MW_EA".BB2_DF.E.ZI :=   "E_BB2_DF_ZI";
+	    "ZEN_Meld".E_BB2_DF_St :=   "E_BB2_DF_St";
+	    "DB117_MW_EA".BB2_DF.E.St :=   "E_BB2_DF_St";
+	    "ZEN_Meld".E_BB2_SR_K_Ein := "E_BB2_SR_K_Ein";
+	    "DB107_Antriebe_EA".BB2_SR_K.E.Ein := "E_BB2_SR_K_Ein";
+	    "ZEN_Meld".E_BB2_SR_K_St := NOT "E_BB2_SR_K_St";
+	    "DB107_Antriebe_EA".BB2_SR_K.E.St := NOT "E_BB2_SR_K_St";
+	    "ZEN_Meld".E_BB2_SR_K_AF_St := NOT "E_BB2_SR_K_AF_St";
+	    "DB107_Antriebe_EA".BB2_SR_K.E.AF_St := NOT "E_BB2_SR_K_AF_St";
+	    "ZEN_Meld".E_ZEN_Res_26_7 :=   "E_ZEN_Res_26_7";
+	    "ZEN_Meld".E_ZEN_Res_27_0 :=   "E_ZEN_Res_27_0";
+	    "ZEN_Meld".E_ZEN_Res_27_1 :=   "E_ZEN_Res_27_1";
+	    "ZEN_Meld".E_ZEN_Res_27_2 :=   "E_ZEN_Res_27_2";
+	    "ZEN_Meld".E_ZEN_Res_27_3 :=   "E_ZEN_Res_27_3";
+	    "ZEN_Meld".E_ZEN_Res_27_4 :=   "E_ZEN_Res_27_4";
+	    "ZEN_Meld".E_ZEN_Res_27_5 :=   "E_ZEN_Res_27_5";
+	    "ZEN_Meld".E_ZEN_Res_27_6 :=   "E_ZEN_Res_27_6";
+	    "ZEN_Meld".E_ZEN_Res_27_7 :=   "E_ZEN_Res_27_7";
+	    "ZEN_Meld".A_BB_G1_Ein :=   "DB107_Antriebe_EA".BB_G1.A.Ein;
+	    "A_BB_G1_Ein" :=   "DB107_Antriebe_EA".BB_G1.A.Ein;
+	    "ZEN_Meld".A_BB_G2_Ein :=   "DB107_Antriebe_EA".BB_G2.A.Ein;
+	    "A_BB_G2_Ein" :=   "DB107_Antriebe_EA".BB_G2.A.Ein;
+	    "ZEN_Meld".A_BB_G3_Ein :=   "DB107_Antriebe_EA".BB_G3.A.Ein;
+	    "A_BB_G3_Ein" :=   "DB107_Antriebe_EA".BB_G3.A.Ein;
+	    "ZEN_Meld".A_BB_LS1_Auf :=   "DB107_Antriebe_EA".BB_LS1.A.Auf;
+	    "A_BB_LS1_Auf" :=   "DB107_Antriebe_EA".BB_LS1.A.Auf;
+	    "ZEN_Meld".A_BB_LS1_Zu :=   "DB107_Antriebe_EA".BB_LS1.A.Zu;
+	    "A_BB_LS1_Zu" :=   "DB107_Antriebe_EA".BB_LS1.A.Zu;
+	    "ZEN_Meld".A_BB_LS2_Auf :=   "DB107_Antriebe_EA".BB_LS2.A.Auf;
+	    "A_BB_LS2_Auf" :=   "DB107_Antriebe_EA".BB_LS2.A.Auf;
+	    "ZEN_Meld".A_BB_LS2_Zu :=   "DB107_Antriebe_EA".BB_LS2.A.Zu;
+	    "A_BB_LS2_Zu" :=   "DB107_Antriebe_EA".BB_LS2.A.Zu;
+	    "A_ZEN_Res_12_7" :=  "ZEN_Meld".A_ZEN_Res_12_7;
+	    "ZEN_Meld".A_BB1_RZP1_Ein :=   "DB107_Antriebe_EA".BB1_RZP1.A.Ein;
+	    "A_BB1_RZP1_Ein" :=   "DB107_Antriebe_EA".BB1_RZP1.A.Ein;
+	    "ZEN_Meld".A_BB1_RZP2_Ein :=   "DB107_Antriebe_EA".BB1_RZP2.A.Ein;
+	    "A_BB1_RZP2_Ein" :=   "DB107_Antriebe_EA".BB1_RZP2.A.Ein;
+	    "ZEN_Meld".A_BB1_UeSP_Ein :=   "DB107_Antriebe_EA".BB1_UeSP.A.Ein;
+	    "A_BB1_UeSP_Ein" :=   "DB107_Antriebe_EA".BB1_UeSP.A.Ein;
+	    "ZEN_Meld".A_BB1_AS1_Auf :=   "DB107_Antriebe_EA".BB1_AS1.A.Auf;
+	    "A_BB1_AS1_Auf" :=   "DB107_Antriebe_EA".BB1_AS1.A.Auf;
+	    "ZEN_Meld".A_BB1_AS1_Zu :=   "DB107_Antriebe_EA".BB1_AS1.A.Zu;
+	    "A_BB1_AS1_Zu" :=   "DB107_Antriebe_EA".BB1_AS1.A.Zu;
+	    "ZEN_Meld".A_BB1_AS2_Auf :=   "DB107_Antriebe_EA".BB1_AS2.A.Auf;
+	    "A_BB1_AS2_Auf" :=   "DB107_Antriebe_EA".BB1_AS2.A.Auf;
+	    "ZEN_Meld".A_BB1_AS2_Zu :=   "DB107_Antriebe_EA".BB1_AS2.A.Zu;
+	    "A_BB1_AS2_Zu" :=   "DB107_Antriebe_EA".BB1_AS2.A.Zu;
+	    "ZEN_Meld".A_BB1_SR1_Auf :=   "DB107_Antriebe_EA".BB1_SR1.A.Auf;
+	    "A_BB1_SR1_Auf" :=   "DB107_Antriebe_EA".BB1_SR1.A.Auf;
+	    "ZEN_Meld".A_BB1_SR2_Auf :=   "DB107_Antriebe_EA".BB1_SR2.A.Auf;
+	    "A_BB1_SR2_Auf" :=   "DB107_Antriebe_EA".BB1_SR2.A.Auf;
+	    "A_ZEN_Res_14_1" :=  "ZEN_Meld".A_ZEN_Res_14_1;
+	    "A_ZEN_Res_14_2" :=  "ZEN_Meld".A_ZEN_Res_14_2;
+	    "A_ZEN_Res_14_3" :=  "ZEN_Meld".A_ZEN_Res_14_3;
+	    "A_ZEN_Res_14_4" :=  "ZEN_Meld".A_ZEN_Res_14_4;
+	    "A_ZEN_Res_14_5" :=  "ZEN_Meld".A_ZEN_Res_14_5;
+	    "A_ZEN_Res_14_6" :=  "ZEN_Meld".A_ZEN_Res_14_6;
+	    "A_ZEN_Res_14_7" :=  "ZEN_Meld".A_ZEN_Res_14_7;
+	    "ZEN_Meld".A_BB2_RZP1_Ein :=   "DB107_Antriebe_EA".BB2_RZP1.A.Ein;
+	    "A_BB2_RZP1_Ein" :=   "DB107_Antriebe_EA".BB2_RZP1.A.Ein;
+	    "ZEN_Meld".A_BB2_RZP2_Ein :=   "DB107_Antriebe_EA".BB2_RZP2.A.Ein;
+	    "A_BB2_RZP2_Ein" :=   "DB107_Antriebe_EA".BB2_RZP2.A.Ein;
+	    "ZEN_Meld".A_BB2_UeSP_Ein :=   "DB107_Antriebe_EA".BB2_UeSP.A.Ein;
+	    "A_BB2_UeSP_Ein" :=   "DB107_Antriebe_EA".BB2_UeSP.A.Ein;
+	    "ZEN_Meld".A_BB2_AS1_Auf :=   "DB107_Antriebe_EA".BB2_AS1.A.Auf;
+	    "A_BB2_AS1_Auf" :=   "DB107_Antriebe_EA".BB2_AS1.A.Auf;
+	    "ZEN_Meld".A_BB2_AS1_Zu :=   "DB107_Antriebe_EA".BB2_AS1.A.Zu;
+	    "A_BB2_AS1_Zu" :=   "DB107_Antriebe_EA".BB2_AS1.A.Zu;
+	    "ZEN_Meld".A_BB2_AS2_Auf :=   "DB107_Antriebe_EA".BB2_AS2.A.Auf;
+	    "A_BB2_AS2_Auf" :=   "DB107_Antriebe_EA".BB2_AS2.A.Auf;
+	    "ZEN_Meld".A_BB2_AS2_Zu :=   "DB107_Antriebe_EA".BB2_AS2.A.Zu;
+	    "A_BB2_AS2_Zu" :=   "DB107_Antriebe_EA".BB2_AS2.A.Zu;
+	    "ZEN_Meld".A_BB2_SR1_Auf :=   "DB107_Antriebe_EA".BB2_SR1.A.Auf;
+	    "A_BB2_SR1_Auf" :=   "DB107_Antriebe_EA".BB2_SR1.A.Auf;
+	    "ZEN_Meld".A_BB2_SR2_Auf :=   "DB107_Antriebe_EA".BB2_SR2.A.Auf;
+	    "A_BB2_SR2_Auf" :=   "DB107_Antriebe_EA".BB2_SR2.A.Auf;
+	    "A_ZEN_Res_16_1" :=  "ZEN_Meld".A_ZEN_Res_16_1;
+	    "A_ZEN_Res_16_2" :=  "ZEN_Meld".A_ZEN_Res_16_2;
+	    "A_ZEN_Res_16_3" :=  "ZEN_Meld".A_ZEN_Res_16_3;
+	    "A_ZEN_Res_16_4" :=  "ZEN_Meld".A_ZEN_Res_16_4;
+	    "A_ZEN_Res_16_5" :=  "ZEN_Meld".A_ZEN_Res_16_5;
+	    "A_ZEN_Res_16_6" :=  "ZEN_Meld".A_ZEN_Res_16_6;
+	    "A_ZEN_Res_16_7" :=  "ZEN_Meld".A_ZEN_Res_16_7;
+	    "ZEN_Meld".A_Zulauf_AS_Auf :=   "DB107_Antriebe_EA".Zulauf_AS.A.Auf;
+	    "A_Zulauf_AS_Auf" :=   "DB107_Antriebe_EA".Zulauf_AS.A.Auf;
+	    "ZEN_Meld".A_Zulauf_AS_Zu :=   "DB107_Antriebe_EA".Zulauf_AS.A.Zu;
+	    "A_Zulauf_AS_Zu" :=   "DB107_Antriebe_EA".Zulauf_AS.A.Zu;
+	    "A_ZEN_Res_17_2" :=  "ZEN_Meld".A_ZEN_Res_17_2;
+	    "A_ZEN_Res_17_3" :=  "ZEN_Meld".A_ZEN_Res_17_3;
+	    "A_ZEN_Res_17_4" :=  "ZEN_Meld".A_ZEN_Res_17_4;
+	    "A_ZEN_Res_17_5" :=  "ZEN_Meld".A_ZEN_Res_17_5;
+	    "A_ZEN_Res_17_6" :=  "ZEN_Meld".A_ZEN_Res_17_6;
+	    "A_ZEN_Res_17_7" :=  "ZEN_Meld".A_ZEN_Res_17_7;
+	    "ZEN_EA".EW_BB1_AS1_SS := "EW_BB1_AS1_SS";
+	    "DB117_MW_EA".BB1_AS1_SS.EW_Peri := w#16#1599;;
+	    "ZEN_EA".EW_BB1_AS2_SS := "EW_BB1_AS2_SS";
+	    "DB117_MW_EA".BB1_AS2_SS.EW_Peri :=   "EW_BB1_AS2_SS";
+	    "ZEN_EA".EW_BB2_AS1_SS := "EW_BB2_AS1_SS";
+	    "DB117_MW_EA".BB2_AS1_SS.EW_Peri :=   "EW_BB2_AS1_SS";
+	    "ZEN_EA".EW_BB2_AS2_SS := "EW_BB2_AS2_SS";
+	    "DB117_MW_EA".BB2_AS2_SS.EW_Peri :=   "EW_BB2_AS2_SS";
+	    "ZEN_EA".EW_BB1_O2 := "EW_BB1_O2";
+	    "DB117_MW_EA".BB1_O2.EW_Peri :=   "EW_BB1_O2";
+	    "ZEN_EA".EW_BB1_Temp := "EW_BB1_Temp";
+	    "DB117_MW_EA".BB1_Temp.EW_Peri :=   "EW_BB1_Temp";
+	    "ZEN_EA".EW_BB2_O2 := "EW_BB2_O2";
+	    "DB117_MW_EA".BB2_O2.EW_Peri :=   "EW_BB2_O2";
+	    "ZEN_EA".EW_BB2_Temp := "EW_BB2_Temp";
+	    "DB117_MW_EA".BB2_Temp.EW_Peri :=   "EW_BB2_Temp";
+	    "ZEN_EA".EW_BB1_DF := "EW_BB1_DF";
+	    "DB117_MW_EA".BB1_DF.EW_Peri := w#16#1599;
+	    "ZEN_EA".EW_BB2_DF := "EW_BB2_DF";
+	    "DB117_MW_EA".BB2_DF.EW_Peri := w#16#1599;
+	    "ZEN_Meld".E_Zulauf_RA_SA_Ein :=   "E_Zulauf_RA_SA_Ein";
+	    "DB107_Antriebe_EA".Zulauf_RA_SA.E.Ein :=   "E_Zulauf_RA_SA_Ein";
+	    "ZEN_Meld".E_Zulauf_RA_HZS_Ein :=   "E_Zulauf_RA_HZS_Ein";
+	    "DB107_Antriebe_EA".Zulauf_RA_HZS.E.Ein :=   "E_Zulauf_RA_HZS_Ein";
+	    "ZEN_Meld".E_Zulauf_RA_VKS_Ein :=   "E_Zulauf_RA_VKS_Ein";
+	    "DB107_Antriebe_EA".Zulauf_RA_VKS.E.Ein :=   "E_Zulauf_RA_VKS_Ein";
+	    "ZEN_Meld".E_Zulauf_RA_V_Ein :=   "E_Zulauf_RA_V_Ein";
+	    "DB107_Antriebe_EA".Zulauf_RA_V.E.Ein :=   "E_Zulauf_RA_V_Ein";
+	    "ZEN_Meld".E_Zulauf_RA_RP_Ein :=   "E_Zulauf_RA_RP_Ein";
+	    "DB107_Antriebe_EA".Zulauf_RA_RP.E.Ein :=   "E_Zulauf_RA_RP_Ein";
+	    "ZEN_Meld".E_Zulauf_RA_FP_Ein :=   "E_Zulauf_RA_FP_Ein";
+	    "DB107_Antriebe_EA".Zulauf_RA_FP.E.Ein :=   "E_Zulauf_RA_FP_Ein";
+	    "ZEN_Meld".E_Zulauf_RA_SA_St :=   "E_Zulauf_RA_SA_St";
+	    "DB107_Antriebe_EA".Zulauf_RA_SA.E.St :=   "E_Zulauf_RA_SA_St";
+	    "ZEN_Meld".E_Zulauf_RA_HZS_St :=   "E_Zulauf_RA_HZS_St";
+	    "DB107_Antriebe_EA".Zulauf_RA_HZS.E.St :=   "E_Zulauf_RA_HZS_St";
+	    "ZEN_Meld".E_Zulauf_RA_VKS_St :=   "E_Zulauf_RA_VKS_St";
+	    "DB107_Antriebe_EA".Zulauf_RA_VKS.E.St :=   "E_Zulauf_RA_VKS_St";
+	    "ZEN_Meld".E_Zulauf_RA_V_St :=   "E_Zulauf_RA_V_St";
+	    "DB107_Antriebe_EA".Zulauf_RA_V.E.St :=   "E_Zulauf_RA_V_St";
+	    "ZEN_Meld".E_Zulauf_RA_RP_St :=   "E_Zulauf_RA_RP_St";
+	    "DB107_Antriebe_EA".Zulauf_RA_RP.E.St :=   "E_Zulauf_RA_RP_St";
+	    "ZEN_Meld".E_Zulauf_RA_FP_St :=   "E_Zulauf_RA_FP_St";
+	    "DB107_Antriebe_EA".Zulauf_RA_FP.E.St :=   "E_Zulauf_RA_FP_St";
+	    "ZEN_Meld".E_Zulauf_RA_24V_St :=   "E_Zulauf_RA_24V_St";
+	    "ZEN_Meld".E_Zulauf_RA_US_St :=   "E_Zulauf_RA_US_St";
+	    "ZEN_Meld".E_Zulauf_RA_230V_St :=   "E_Zulauf_RA_230V_St";
+	    "ZEN_Meld".E_Zulauf_DF_St :=   "E_Zulauf_DF_St";
+	    "DB117_MW_EA".Zulauf_DF.E.St :=   "E_Zulauf_DF_St";
+	    "ZEN_Meld".E_Zulauf_Niv_St :=   "E_Zulauf_Niv_St";
+	    "DB117_MW_EA".Zulauf_Niv.E.St :=   "E_Zulauf_Niv_St";
+	    "ZEN_Meld".E_Verteiler_pH_St :=   "E_Verteiler_pH_St";
+	    "DB117_MW_EA".Verteiler_pH.E.St :=   "E_Verteiler_pH_St";
+	    "ZEN_Meld".E_Zulauf_AS_EA :=   "E_Zulauf_AS_EA";
+	    "DB107_Antriebe_EA".Zulauf_AS.E.EA :=   "E_Zulauf_AS_EA";
+	    "ZEN_Meld".E_Zulauf_AS_EZ :=   "E_Zulauf_AS_EZ";
+	    "DB107_Antriebe_EA".Zulauf_AS.E.EZ :=   "E_Zulauf_AS_EZ";
+	    "ZEN_Meld".E_Zulauf_AS_St :=   "E_Zulauf_AS_St";
+	    "DB107_Antriebe_EA".Zulauf_AS.E.St :=   "E_Zulauf_AS_St";
+	    "ZEN_Meld".E_Zulauf_AS_Bed_vOrt :=   "E_Zulauf_AS_Bed_vOrt";
+	    "DB107_Antriebe_EA".Zulauf_AS.E.Bed_vOrt :=   "E_Zulauf_AS_Bed_vOrt";
+	    "ZEN_Meld".E_Zulauf_AS_Bed_Fern :=  NOT "E_Zulauf_AS_Bed_Fern";
+	    "DB107_Antriebe_EA".Zulauf_AS.E.Bed_Fern :=  NOT "E_Zulauf_AS_Bed_Fern";
+	    "ZEN_Meld".E_Zulauf_AS_AF_St :=  "E_Zulauf_AS_AF_St";
+	    "DB107_Antriebe_EA".Zulauf_AS.E.AF_St :=  "E_Zulauf_AS_AF_St";
+	    "ZEN_Meld".E_ZEN_Res_31_1 :=   "E_ZEN_Res_31_1";
+	    "ZEN_Meld".E_ZEN_Res_31_2 :=   "E_ZEN_Res_31_2";
+	    "ZEN_Meld".E_ZEN_Res_31_3 :=   "E_ZEN_Res_31_3";
+	    "ZEN_Meld".E_ZEN_Res_31_4 :=   "E_ZEN_Res_31_4";
+	    "ZEN_Meld".E_ZEN_Res_31_5 :=   "E_ZEN_Res_31_5";
+	    "ZEN_Meld".E_ZEN_Res_31_6 :=   "E_ZEN_Res_31_6";
+	    "ZEN_Meld".E_ZEN_Res_31_7 :=   "E_ZEN_Res_31_7";
+	
+	    
+	END_IF;
+	
+	//dezentrale Peripherie - Teilnehmer 4  
+	IF "DB91_DP_aktiv".Tln[4] THEN
+	    "ZEN_Meld".E_ZEN_Res_40_0 := "E_ZEN_Res_40_0";
+	    "ZEN_Meld".E_Schlamm_BP_Ein := "E_Schlamm_BP_Ein";
+	    "DB107_Antriebe_EA".Schlamm_BP.E.Ein := "E_Schlamm_BP_Ein";
+	    "ZEN_Meld".E_Schlamm_BP_St := NOT "E_Schlamm_BP_St";
+	    "DB107_Antriebe_EA".Schlamm_BP.E.St := NOT "E_Schlamm_BP_St";
+	    "ZEN_Meld".E_Schlamm_BP_Bed_vOrt := "E_Schlamm_BP_Bed_vOrt";
+	    "DB107_Antriebe_EA".Schlamm_BP.E.Bed_vOrt := "E_Schlamm_BP_Bed_vOrt";
+	    "ZEN_Meld".E_Schlamm_BP_Bed_Fern := "E_Schlamm_BP_Bed_Fern";
+	    "DB107_Antriebe_EA".Schlamm_BP.E.Bed_Fern := "E_Schlamm_BP_Bed_Fern";
+	    "ZEN_Meld".E_Schlamm_BP_AF_St := NOT "E_Schlamm_BP_AF_St";
+	    "DB107_Antriebe_EA".Schlamm_BP.E.AF_St := NOT "E_Schlamm_BP_AF_St";
+	    "ZEN_Meld".E_Truebwasser_P1_Ein := "E_Truebwasser_P1_Ein";
+	    "DB107_Antriebe_EA".Truebwasser_P1.E.Ein := "E_Truebwasser_P1_Ein";
+	    "ZEN_Meld".E_Truebwasser_P1_St := NOT "E_Truebwasser_P1_St";
+	    "DB107_Antriebe_EA".Truebwasser_P1.E.St := NOT "E_Truebwasser_P1_St";
+	    "ZEN_Meld".E_Truebwasser_P1_Bed_vOrt := "E_Truebwasser_P1_Bed_vOrt";
+	    "DB107_Antriebe_EA".Truebwasser_P1.E.Bed_vOrt := "E_Truebwasser_P1_Bed_vOrt";
+	    "ZEN_Meld".E_Truebwasser_P1_Bed_Fern := "E_Truebwasser_P1_Bed_Fern";
+	    "DB107_Antriebe_EA".Truebwasser_P1.E.Bed_Fern := "E_Truebwasser_P1_Bed_Fern";
+	    "ZEN_Meld".E_Truebwasser_P1_AF_St := NOT "E_Truebwasser_P1_AF_St";
+	    "DB107_Antriebe_EA".Truebwasser_P1.E.AF_St := NOT "E_Truebwasser_P1_AF_St";
+	    "ZEN_Meld".E_Truebwasser_P2_Ein := "E_Truebwasser_P2_Ein";
+	    "DB107_Antriebe_EA".Truebwasser_P2.E.Ein := "E_Truebwasser_P2_Ein";
+	    "ZEN_Meld".E_Truebwasser_P2_St := NOT "E_Truebwasser_P2_St";
+	    "DB107_Antriebe_EA".Truebwasser_P2.E.St := NOT "E_Truebwasser_P2_St";
+	    "ZEN_Meld".E_Truebwasser_P2_Bed_vOrt := "E_Truebwasser_P2_Bed_vOrt";
+	    "DB107_Antriebe_EA".Truebwasser_P2.E.Bed_vOrt := "E_Truebwasser_P2_Bed_vOrt";
+	    "ZEN_Meld".E_Truebwasser_P2_Bed_Fern := "E_Truebwasser_P2_Bed_Fern";
+	    "DB107_Antriebe_EA".Truebwasser_P2.E.Bed_Fern := "E_Truebwasser_P2_Bed_Fern";
+	    "ZEN_Meld".E_Truebwasser_P2_AF_St := NOT "E_Truebwasser_P2_AF_St";
+	    "DB107_Antriebe_EA".Truebwasser_P2.E.AF_St := NOT "E_Truebwasser_P2_AF_St";
+	    "ZEN_Meld".E_Schlamm_AS_EZ := "E_Schlamm_AS_EZ";
+	    "DB107_Antriebe_EA".Schlamm_AS.E.EZ := "E_Schlamm_AS_EZ";
+	    "ZEN_Meld".E_Schlamm_AS_EA := "E_Schlamm_AS_EA";
+	    "DB107_Antriebe_EA".Schlamm_AS.E.EA := "E_Schlamm_AS_EA";
+	    "ZEN_Meld".E_Schlamm_AS_St := NOT "E_Schlamm_AS_St";
+	    "DB107_Antriebe_EA".Schlamm_AS.E.St := NOT "E_Schlamm_AS_St";
+	    "ZEN_Meld".E_Schlamm_AS_Bed_vOrt := "E_Schlamm_AS_Bed_vOrt";
+	    "DB107_Antriebe_EA".Schlamm_AS.E.Bed_vOrt := "E_Schlamm_AS_Bed_vOrt";
+	    "ZEN_Meld".E_Schlamm_AS_Bed_Fern := "E_Schlamm_AS_Bed_Fern";
+	    "DB107_Antriebe_EA".Schlamm_AS.E.Bed_Fern := "E_Schlamm_AS_Bed_Fern";
+	    "ZEN_Meld".E_Schlamm_AS_AF_St := NOT "E_Schlamm_AS_AF_St";
+	    "DB107_Antriebe_EA".Schlamm_AS.E.AF_St := NOT "E_Schlamm_AS_AF_St";
+	    "ZEN_Meld".E_ZEN_Res_42_6 := "E_ZEN_Res_42_6";
+	    "ZEN_Meld".E_ZEN_Res_42_7 := "E_ZEN_Res_42_7";
+	    "ZEN_Meld".E_Schlamm_Besch_DF_ZI := "E_Schlamm_Besch_DF_ZI";
+	    "DB117_MW_EA".Schlamm_Besch_DF.E.ZI := "E_Schlamm_Besch_DF_ZI";
+	    "DB96_ZW".Schlamm_Besch_DF.Impuls := "E_Schlamm_Besch_DF_ZI";
+	    "ZEN_Meld".E_Schlamm_Besch_DF_St := "E_Schlamm_Besch_DF_St";
+	    "DB117_MW_EA".Schlamm_Besch_DF.E.St := "E_Schlamm_Besch_DF_St";
+	    "ZEN_Meld".E_Truebwasser_Niv_St := "E_Truebwasser_Niv_St";
+	    "DB117_MW_EA".Truebwasser_Niv.E.St := "E_Truebwasser_Niv_St";
+	    "ZEN_Meld".E_Truebwasser_DF_ZI := "E_Truebwasser_DF_ZI";
+	    "DB117_MW_EA".Truebwasser_DF.E.ZI := "E_Truebwasser_DF_ZI";
+	    "DB96_ZW".Truebwasser_DF.Impuls := "E_Truebwasser_DF_ZI";
+	    "ZEN_Meld".E_Truebwasser_DF_St := "E_Truebwasser_DF_St";
+	    "DB117_MW_EA".Truebwasser_DF.E.St := "E_Truebwasser_DF_St";
+	    "ZEN_Meld".E_ZEN_Res_43_5 := "E_ZEN_Res_43_5";
+	    "ZEN_Meld".E_ZEN_Res_43_6 := "E_ZEN_Res_43_6";
+	    "ZEN_Meld".E_ZEN_Res_43_7 := "E_ZEN_Res_43_7";
+	    "ZEN_Meld".A_Schlamm_BP_Ein := "DB107_Antriebe_EA".Schlamm_BP.A.Ein;
+	    "A_Schlamm_BP_Ein" := "DB107_Antriebe_EA".Schlamm_BP.A.Ein;
+	    "ZEN_Meld".A_Truebwasser_P1_Ein := "DB107_Antriebe_EA".Truebwasser_P1.A.Ein;
+	    "A_Truebwasser_P1_Ein" := "DB107_Antriebe_EA".Truebwasser_P1.A.Ein;
+	    "ZEN_Meld".A_Truebwasser_P2_Ein := "DB107_Antriebe_EA".Truebwasser_P2.A.Ein;
+	    "A_Truebwasser_P2_Ein" := "DB107_Antriebe_EA".Truebwasser_P2.A.Ein;
+	    "ZEN_Meld".A_Schlamm_AS_Auf := "DB107_Antriebe_EA".Schlamm_AS.A.Auf;
+	    "A_Schlamm_AS_Auf" := "DB107_Antriebe_EA".Schlamm_AS.A.Auf;
+	    "ZEN_Meld".A_Schlamm_AS_Zu := "DB107_Antriebe_EA".Schlamm_AS.A.Zu;
+	    "A_Schlamm_AS_Zu" := "DB107_Antriebe_EA".Schlamm_AS.A.Zu;
+	    "A_ZEN_Res_40_5" := "ZEN_Meld".A_ZEN_Res_40_5;
+	    "A_ZEN_Res_40_6" := "ZEN_Meld".A_ZEN_Res_40_6;
+	    "A_ZEN_Res_40_7" := "ZEN_Meld".A_ZEN_Res_40_7;
+	    "A_ZEN_Res_41_0" := "ZEN_Meld".A_ZEN_Res_41_0;
+	    "A_ZEN_Res_41_1" := "ZEN_Meld".A_ZEN_Res_41_1;
+	    "A_ZEN_Res_41_2" := "ZEN_Meld".A_ZEN_Res_41_2;
+	    "A_ZEN_Res_41_3" := "ZEN_Meld".A_ZEN_Res_41_3;
+	    "A_ZEN_Res_41_4" := "ZEN_Meld".A_ZEN_Res_41_4;
+	    "A_ZEN_Res_41_5" := "ZEN_Meld".A_ZEN_Res_41_5;
+	    "A_ZEN_Res_41_6" := "ZEN_Meld".A_ZEN_Res_41_6;
+	    "A_ZEN_Res_41_7" := "ZEN_Meld".A_ZEN_Res_41_7;
+	    "A_ZEN_Res_42_0" := "ZEN_Meld".A_ZEN_Res_42_0;
+	    "A_ZEN_Res_42_1" := "ZEN_Meld".A_ZEN_Res_42_1;
+	    "A_ZEN_Res_42_2" := "ZEN_Meld".A_ZEN_Res_42_2;
+	    "A_ZEN_Res_42_3" := "ZEN_Meld".A_ZEN_Res_42_3;
+	    "A_ZEN_Res_42_4" := "ZEN_Meld".A_ZEN_Res_42_4;
+	    "A_ZEN_Res_42_5" := "ZEN_Meld".A_ZEN_Res_42_5;
+	    "A_ZEN_Res_42_6" := "ZEN_Meld".A_ZEN_Res_42_6;
+	    "A_ZEN_Res_42_7" := "ZEN_Meld".A_ZEN_Res_42_7;
+	    "A_ZEN_Res_43_0" := "ZEN_Meld".A_ZEN_Res_43_0;
+	    "A_ZEN_Res_43_1" := "ZEN_Meld".A_ZEN_Res_43_1;
+	    "A_ZEN_Res_43_2" := "ZEN_Meld".A_ZEN_Res_43_2;
+	    "A_ZEN_Res_43_3" := "ZEN_Meld".A_ZEN_Res_43_3;
+	    "A_ZEN_Res_43_4" := "ZEN_Meld".A_ZEN_Res_43_4;
+	    "A_ZEN_Res_43_5" := "ZEN_Meld".A_ZEN_Res_43_5;
+	    "A_ZEN_Res_43_6" := "ZEN_Meld".A_ZEN_Res_43_6;
+	    "A_ZEN_Res_43_7" := "ZEN_Meld".A_ZEN_Res_43_7;
+	    "ZEN_EA".EW_Schlamm_Besch_DF := "EW_Schlamm_Besch_DF";
+	    "DB117_MW_EA".Schlamm_Besch_DF.EW_Peri := "EW_Schlamm_Besch_DF";
+	    "ZEN_EA".EW_Truebwasser_Niv := "EW_Truebwasser_Niv";
+	    "DB117_MW_EA".Truebwasser_Niv.EW_Peri := "EW_Truebwasser_Niv";
+	    "ZEN_EA".EW_Truebwasser_DF := "EW_Truebwasser_DF";
+	    "DB117_MW_EA".Truebwasser_DF.EW_Peri := "EW_Truebwasser_DF";
+	    "DB117_MW_EA".Ablauf_NOx.EW_Peri := "EW_Ablauf_NOx";
+	    "DB117_MW_EA".Ablauf_PO4.EW_Peri := "EW_Ablauf_PO4";
+	    
+	    "DB117_MW_EA".Schlamm_Besch_Niv.EW_Peri := w#16#1599;
+	    "DB117_MW_EA".Schlamm_ED_Niv.EW_Peri := w#16#1599;
+	    
+	    "DB117_MW_EA".Umwelt_WG.EW_Peri := "EW_Umwelt_WG";
+	    "DB117_MW_EA".Umwelt_WR.EW_Peri := "EW_Umwelt_WR";
+	    "DB117_MW_EA".Umwelt_LDr.EW_Peri := "EW_Umwelt_LDr";
+	    "DB117_MW_EA".Umwelt_LF.EW_Peri := "EW_Umwelt_LF";
+	    "DB117_MW_EA".Umwelt_T.EW_Peri := "EW_Umwelt_T";
+	    "DB117_MW_EA".Ablauf_LF.EW_Peri := "EW_Ablauf_LF";
+	    
+	END_IF;
+	//dezentrale Peripherie Dosierpumpe - Teilnehmer 5
+	IF "DB91_DP_aktiv".Tln[5] THEN
+	    "FC63_DB_Copy"(DB_src := 0,
+	                   DB_src_offs := 5000,
+	                   DB_dest := 80,
+	                   DB_dest_offs := 0,
+	                   count := 26);
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 26,
+	                   DB_dest := 0,
+	                   DB_dest_offs := 5000,
+	                   count := 5);
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 32,
+	                   DB_dest := 0,
+	                   DB_dest_offs := 5006,
+	                   count := 4);
+	END_IF;
+	//dezentrale Peripherie Hach-Lange Dosierrechner - Teilnehmer 10
+	IF "DB91_DP_aktiv".Tln[10] THEN
+	    "FC63_DB_Copy"(DB_src := 0,
+	                   DB_src_offs := 372,
+	                   DB_dest := 80,
+	                   DB_dest_offs := 44,
+	                   count := 20);
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 64,
+	                   DB_dest := 0,
+	                   DB_dest_offs := 340,
+	                   count := 32);
+	
+	END_IF;
+	//dezentrale Peripherie Kaeser Gebläse 1 - Teilnehmer 6
+	IF "DB91_DP_aktiv".Tln[6] THEN
+	    "FC63_DB_Copy"(DB_src := 0,
+	                   DB_src_offs := 1000,
+	                   DB_dest := 80,
+	                   DB_dest_offs := 96,
+	                   count := 128);
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 224,
+	                   DB_dest := 0,
+	                   DB_dest_offs := 1000,
+	                   count := 64);
+	    
+	    //Übertragung in Melde-DB
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 96,
+	                   DB_dest := 100,
+	                   DB_dest_offs := 64,
+	                   count := 34);
+	    //div. Messwerte
+	    "ZEN_MW".BB_G1_KS_Druck_Netz := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Druck_Netz) / 1.0;
+	    "ZEN_MW".BB_G1_KS_Temp_Verdicht := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Temp_Verdicht) / 10.0;
+	    "ZEN_MW".BB_G1_KS_Temp_Schallhaube := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Temp_Schallhaube) / 10.0;
+	    "ZEN_MW".BB_G1_KS_Temp_Ansaug := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Temp_Ansaug) / 10.0;
+	    "ZEN_MW".BB_G1_KS_Temp_Oel := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Temp_Oel) / 10.0;
+	    "ZEN_MW".BB_G1_KS_Temp_Wicklung := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Temp_Wicklung) / 10.0;
+	    "ZEN_MW".BB_G1_KS_Volumenstrom := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Volumenstrom) * 6.0;
+	    "ZEN_MW".BB_G1_KS_Motorfrequenz := INT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Motorfrequenz) / 1.0;
+	    "ZEN_MW".BB_G1_KS_Motordrehzahl := UINT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Motordrehzahl) / 1.0;
+	    "ZEN_MW".BB_G1_KS_Blockdrehzahl := UINT_TO_REAL("DB80_Peri_EA".Kaeser_G1.E.Blockdrehzahl) / 1.0;
+	END_IF;
+	//dezentrale Peripherie Kaeser Gebläse 2 - Teilnehmer 7
+	IF "DB91_DP_aktiv".Tln[7] THEN
+	    "FC63_DB_Copy"(DB_src := 0,
+	                   DB_src_offs := 1200,
+	                   DB_dest := 80,
+	                   DB_dest_offs := 296,
+	                   count := 128);
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 424,
+	                   DB_dest := 0,
+	                   DB_dest_offs := 1200,
+	                   count := 64);
+	    
+	    //Übertragung in Melde-DB
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 296,
+	                   DB_dest := 100,
+	                   DB_dest_offs := 98,
+	                   count := 34);
+	    //div. Messwerte
+	    "ZEN_MW".BB_G2_KS_Druck_Netz := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Druck_Netz) / 1.0;
+	    "ZEN_MW".BB_G2_KS_Temp_Verdicht := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Temp_Verdicht) / 10.0;
+	    "ZEN_MW".BB_G2_KS_Temp_Schallhaube := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Temp_Schallhaube) / 10.0;
+	    "ZEN_MW".BB_G2_KS_Temp_Ansaug := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Temp_Ansaug) / 10.0;
+	    "ZEN_MW".BB_G2_KS_Temp_Oel := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Temp_Oel) / 10.0;
+	    "ZEN_MW".BB_G2_KS_Temp_Wicklung := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Temp_Wicklung) / 10.0;
+	    "ZEN_MW".BB_G2_KS_Volumenstrom := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Volumenstrom) * 6.0;
+	    "ZEN_MW".BB_G2_KS_Motorfrequenz := INT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Motorfrequenz) / 1.0;
+	    "ZEN_MW".BB_G2_KS_Motordrehzahl := UINT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Motordrehzahl) / 1.0;
+	    "ZEN_MW".BB_G2_KS_Blockdrehzahl := UINT_TO_REAL("DB80_Peri_EA".Kaeser_G2.E.Blockdrehzahl) / 1.0;
+	    
+	END_IF;
+	//dezentrale Peripherie Kaeser Gebläse 3 - Teilnehmer 8
+	IF "DB91_DP_aktiv".Tln[8] THEN
+	    "FC63_DB_Copy"(DB_src := 0,
+	                   DB_src_offs := 1400,
+	                   DB_dest := 80,
+	                   DB_dest_offs := 496,
+	                   count := 128);
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 624,
+	                   DB_dest := 0,
+	                   DB_dest_offs := 1400,
+	                   count := 64);
+	    
+	    //Übertragung in Melde-DB
+	    "FC63_DB_Copy"(DB_src := 80,
+	                   DB_src_offs := 496,
+	                   DB_dest := 100,
+	                   DB_dest_offs := 132,
+	                   count := 34);
+	    //div. Messwerte
+	    "ZEN_MW".BB_G3_KS_Druck_Netz := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Druck_Netz) / 1.0;
+	    "ZEN_MW".BB_G3_KS_Temp_Verdicht := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Temp_Verdicht) / 10.0;
+	    "ZEN_MW".BB_G3_KS_Temp_Schallhaube := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Temp_Schallhaube) / 10.0;
+	    "ZEN_MW".BB_G3_KS_Temp_Ansaug := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Temp_Ansaug) / 10.0;
+	    "ZEN_MW".BB_G3_KS_Temp_Oel := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Temp_Oel) / 10.0;
+	    "ZEN_MW".BB_G3_KS_Temp_Wicklung := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Temp_Wicklung) / 10.0;
+	    "ZEN_MW".BB_G3_KS_Volumenstrom := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Volumenstrom)*6.0;
+	    "ZEN_MW".BB_G3_KS_Motorfrequenz := INT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Motorfrequenz) / 1.0;
+	    "ZEN_MW".BB_G3_KS_Motordrehzahl := UINT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Motordrehzahl) / 1.0;
+	    "ZEN_MW".BB_G3_KS_Blockdrehzahl := UINT_TO_REAL("DB80_Peri_EA".Kaeser_G3.E.Blockdrehzahl) / 1.0;
+	    
+	END_IF;
+	
+	
+	"ZEN_Meld".ZEN_DiagKom_DP_BF3 := NOT "DB91_DP_aktiv".Tln[3];
+	"ZEN_Meld".ZEN_DiagKom_DP_BF4 := NOT "DB91_DP_aktiv".Tln[4];
+	"ZEN_Meld".ZEN_DiagKom_DP_BF5 := NOT "DB91_DP_aktiv".Tln[5];
+	"ZEN_Meld".ZEN_DiagKom_DP_BF6 := NOT "DB91_DP_aktiv".Tln[6];
+	"ZEN_Meld".ZEN_DiagKom_DP_BF7 := NOT "DB91_DP_aktiv".Tln[7];
+	"ZEN_Meld".ZEN_DiagKom_DP_BF8 := NOT "DB91_DP_aktiv".Tln[8];
+	"ZEN_Meld".ZEN_DiagKom_DP_BF10 := NOT "DB91_DP_aktiv".Tln[10];
+	
+	//Meldungen für OP
+	//
+	IF 1 THEN
+	    
+	    "DB92_OP_Data".Msg_B0[0].%X0 := "ZEN_Meld".E_Zulauf_AR_P1_St;
+	    "DB92_OP_Data".Msg_B0[0].%X1 := "ZEN_Meld".E_Zulauf_AR_SS;
+	    "DB92_OP_Data".Msg_B0[0].%X2 := "ZEN_Meld".E_Zulauf_AR_P2_St;
+	    "DB92_OP_Data".Msg_B0[0].%X3 := "ZEN_Meld".E_Zulauf_AR_HW;
+	    "DB92_OP_Data".Msg_B0[0].%X4 := "ZEN_Meld".E_Zulauf_AR_Niv_St;
+	    "DB92_OP_Data".Msg_B0[0].%X5 := "ZEN_Meld".E_Zulauf_AR_DF_St;
+	    "DB92_OP_Data".Msg_B0[0].%X6 := "ZEN_Meld".E_Ablauf_pH_St;
+	    "DB92_OP_Data".Msg_B0[0].%X7 := "ZEN_Meld".E_Ablauf_O2_St;
+	    "DB92_OP_Data".Msg_B0[0].%X8 := "ZEN_Meld".E_Ablauf_DF_St;
+	    "DB92_OP_Data".Msg_B0[0].%X9 := "ZEN_Meld".E_NSHV_SS1_St;
+	    "DB92_OP_Data".Msg_B0[0].%X10 := "ZEN_Meld".E_NSHV_SS2_St;
+	    "DB92_OP_Data".Msg_B0[0].%X11 := "ZEN_Meld".E_NSHV_N02_AF_St;
+	    "DB92_OP_Data".Msg_B0[0].%X12 := "ZEN_Meld".E_NSHV_N03_AF_St;
+	    "DB92_OP_Data".Msg_B0[0].%X13 := "ZEN_Meld".E_NSHV_N04_AF_St;
+	    "DB92_OP_Data".Msg_B0[0].%X14 := "ZEN_Meld".E_NSHV_LS_Aus;
+	    "DB92_OP_Data".Msg_B0[0].%X15 := "ZEN_Meld".E_NSHV_LS_St;
+	    "DB92_OP_Data".Msg_B0[1].%X0 := "ZEN_Meld".E_NSHV_NA;
+	    "DB92_OP_Data".Msg_B0[1].%X1 := "ZEN_Meld".E_BB_G1_St;
+	    "DB92_OP_Data".Msg_B0[1].%X2 := "ZEN_Meld".E_BB_G1_AF_St;
+	    "DB92_OP_Data".Msg_B0[1].%X3 := "ZEN_Meld".E_BB_SHL_G1_St;
+	    "DB92_OP_Data".Msg_B0[1].%X4 := "ZEN_Meld".E_BB_G2_St;
+	    "DB92_OP_Data".Msg_B0[1].%X5 := "ZEN_Meld".E_BB_G2_AF_St;
+	    "DB92_OP_Data".Msg_B0[1].%X6 := "ZEN_Meld".E_BB_SHL_G2_St;
+	    "DB92_OP_Data".Msg_B0[1].%X7 := "ZEN_Meld".E_BB_G3_St;
+	    "DB92_OP_Data".Msg_B0[1].%X8 := "ZEN_Meld".E_BB_G3_AF_St;
+	    "DB92_OP_Data".Msg_B0[1].%X9 := "ZEN_Meld".E_BB_SHL_G3_St;
+	    "DB92_OP_Data".Msg_B0[1].%X10 := "ZEN_Meld".E_BB_AV_St;
+	    "DB92_OP_Data".Msg_B0[1].%X11 := "ZEN_Meld".E_BB_AV_AF_St;
+	    "DB92_OP_Data".Msg_B0[1].%X12 := "ZEN_Meld".E_BB_RT;
+	    "DB92_OP_Data".Msg_B0[1].%X13 := "ZEN_Meld".E_BB1_SR_K_St;
+	    "DB92_OP_Data".Msg_B0[1].%X14 := "ZEN_Meld".E_BB1_SR_K_AF_St;
+	    "DB92_OP_Data".Msg_B0[1].%X15 := "ZEN_Meld".E_BB_LS1_St;
+	    "DB92_OP_Data".Msg_B0[2].%X0 := "ZEN_Meld".E_BB_LS1_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X1 := "ZEN_Meld".E_BB_LS2_St;
+	    "DB92_OP_Data".Msg_B0[2].%X2 := "ZEN_Meld".E_BB_LS2_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X3 := "ZEN_Meld".E_BB1_RZP1_St;
+	    "DB92_OP_Data".Msg_B0[2].%X4 := "ZEN_Meld".E_BB1_RZP1_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X5 := "ZEN_Meld".E_BB1_RZP2_St;
+	    "DB92_OP_Data".Msg_B0[2].%X6 := "ZEN_Meld".E_BB1_RZP2_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X7 := "ZEN_Meld".E_BB1_UeSP_St;
+	    "DB92_OP_Data".Msg_B0[2].%X8 := "ZEN_Meld".E_BB1_UeSP_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X9 := "ZEN_Meld".E_BB1_AS1_St;
+	    "DB92_OP_Data".Msg_B0[2].%X10 := "ZEN_Meld".E_BB1_AS1_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X11 := "ZEN_Meld".E_BB1_AS2_St;
+	    "DB92_OP_Data".Msg_B0[2].%X12 := "ZEN_Meld".E_BB1_AS2_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X13 := "ZEN_Meld".E_BB1_SR1_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X14 := "ZEN_Meld".E_BB1_SR2_AF_St;
+	    "DB92_OP_Data".Msg_B0[2].%X15 := "ZEN_Meld".E_BB1_O2_St;
+	    "DB92_OP_Data".Msg_B0[3].%X0 := "ZEN_Meld".E_BB1_DF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X1 := "ZEN_Meld".E_BB2_RZP1_St;
+	    "DB92_OP_Data".Msg_B0[3].%X2 := "ZEN_Meld".E_BB2_RZP1_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X3 := "ZEN_Meld".E_BB2_RZP2_St;
+	    "DB92_OP_Data".Msg_B0[3].%X4 := "ZEN_Meld".E_BB2_RZP2_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X5 := "ZEN_Meld".E_BB2_UeSP_St;
+	    "DB92_OP_Data".Msg_B0[3].%X6 := "ZEN_Meld".E_BB2_UeSP_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X7 := "ZEN_Meld".E_BB2_AS1_St;
+	    "DB92_OP_Data".Msg_B0[3].%X8 := "ZEN_Meld".E_BB2_AS1_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X9 := "ZEN_Meld".E_BB2_AS2_St;
+	    "DB92_OP_Data".Msg_B0[3].%X10 := "ZEN_Meld".E_BB2_AS2_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X11 := "ZEN_Meld".E_BB2_SR1_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X12 := "ZEN_Meld".E_BB2_SR2_AF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X13 := "ZEN_Meld".E_BB2_O2_St;
+	    "DB92_OP_Data".Msg_B0[3].%X14 := "ZEN_Meld".E_BB2_DF_St;
+	    "DB92_OP_Data".Msg_B0[3].%X15 := "ZEN_Meld".E_BB2_SR_K_St;
+	    "DB92_OP_Data".Msg_B0[4].%X0 := "ZEN_Meld".E_BB2_SR_K_AF_St;
+	    "DB92_OP_Data".Msg_B0[4].%X1 := "ZEN_Meld".E_Zulauf_RA_SA_St;
+	    "DB92_OP_Data".Msg_B0[4].%X2 := "ZEN_Meld".E_Zulauf_RA_HZS_St;
+	    "DB92_OP_Data".Msg_B0[4].%X3 := "ZEN_Meld".E_Zulauf_RA_VKS_St;
+	    "DB92_OP_Data".Msg_B0[4].%X4 := "ZEN_Meld".E_Zulauf_RA_V_St;
+	    "DB92_OP_Data".Msg_B0[4].%X5 := "ZEN_Meld".E_Zulauf_RA_RP_St;
+	    "DB92_OP_Data".Msg_B0[4].%X6 := "ZEN_Meld".E_Zulauf_RA_FP_St;
+	    "DB92_OP_Data".Msg_B0[4].%X7 := "ZEN_Meld".E_Zulauf_RA_24V_St;
+	    "DB92_OP_Data".Msg_B0[4].%X8 := "ZEN_Meld".E_Zulauf_RA_US_St;
+	    "DB92_OP_Data".Msg_B0[4].%X9 := "ZEN_Meld".E_Zulauf_RA_230V_St;
+	    "DB92_OP_Data".Msg_B0[4].%X10 := "ZEN_Meld".E_Zulauf_DF_St;
+	    "DB92_OP_Data".Msg_B0[4].%X11 := "ZEN_Meld".E_Zulauf_Niv_St;
+	    "DB92_OP_Data".Msg_B0[4].%X12 := "ZEN_Meld".E_Verteiler_pH_St;
+	    "DB92_OP_Data".Msg_B0[4].%X13 := "ZEN_Meld".E_Zulauf_AS_St;
+	    "DB92_OP_Data".Msg_B0[4].%X14 := "ZEN_Meld".E_Zulauf_AS_AF_St;
+	    "DB92_OP_Data".Msg_B0[4].%X15 := "ZEN_Meld".E_Schlamm_BP_St;
+	    "DB92_OP_Data".Msg_B0[5].%X0 := "ZEN_Meld".E_Schlamm_BP_AF_St;
+	    "DB92_OP_Data".Msg_B0[5].%X1 := "ZEN_Meld".E_Truebwasser_P1_St;
+	    "DB92_OP_Data".Msg_B0[5].%X2 := "ZEN_Meld".E_Truebwasser_P1_AF_St;
+	    "DB92_OP_Data".Msg_B0[5].%X3 := "ZEN_Meld".E_Truebwasser_P2_St;
+	    "DB92_OP_Data".Msg_B0[5].%X4 := "ZEN_Meld".E_Truebwasser_P2_AF_St;
+	    "DB92_OP_Data".Msg_B0[5].%X5 := "ZEN_Meld".E_Schlamm_AS_St;
+	    "DB92_OP_Data".Msg_B0[5].%X6 := "ZEN_Meld".E_Schlamm_AS_AF_St;
+	    "DB92_OP_Data".Msg_B0[5].%X7 := "ZEN_Meld".E_Schlamm_Besch_DF_St;
+	    "DB92_OP_Data".Msg_B0[5].%X8 := "ZEN_Meld".E_Truebwasser_Niv_St;
+	    "DB92_OP_Data".Msg_B0[5].%X9 := "ZEN_Meld".E_Truebwasser_DF_St;
+	    "DB92_OP_Data".Msg_B0[5].%X10 := "ZEN_Meld".ZEN_DiagKom_IEC;
+	    "DB92_OP_Data".Msg_B0[5].%X11 := "ZEN_Meld".ZEN_DiagKom_DP_BF3;
+	    "DB92_OP_Data".Msg_B0[5].%X12 := "ZEN_Meld".ZEN_DiagKom_DP_BF4;
+	    "DB92_OP_Data".Msg_B0[5].%X13 := "ZEN_Meld".ZEN_ObjS_Alarm;
+	    "DB92_OP_Data".Msg_B0[5].%X14 := "ZEN_Meld".ZEN_ObjS_unscharf;
+	    "DB92_OP_Data".Msg_B0[5].%X15 := "ZEN_Meld".ZEN_NA_res;
+	    "DB92_OP_Data".Msg_B0[6].%X0 := "ZEN_Meld".Biocos1_Auto_Bel_O2_St;
+	    "DB92_OP_Data".Msg_B0[6].%X1 := "ZEN_Meld".Biocos1_Auto_Bel_O2_min;
+	    "DB92_OP_Data".Msg_B0[6].%X2 := "ZEN_Meld".Biocos1_Auto_UeSS_Menge_St;
+	    "DB92_OP_Data".Msg_B0[6].%X3 := "ZEN_Meld".Biocos2_Auto_Bel_O2_St;
+	    "DB92_OP_Data".Msg_B0[6].%X4 := "ZEN_Meld".Biocos2_Auto_Bel_O2_min;
+	    "DB92_OP_Data".Msg_B0[6].%X5 := "ZEN_Meld".Biocos2_Auto_UeSS_Menge_St;
+	    "DB92_OP_Data".Msg_B0[6].%X6 := "ZEN_Meld".Zulauf_PW_Auto_DF_max;
+	    "DB92_OP_Data".Msg_B0[6].%X7 := "ZEN_Meld".Zulauf_PW_Auto_Niv_max;
+	    "DB92_OP_Data".Msg_B0[6].%X8 := "ZEN_Meld".Zulauf_PW_Auto_Niv_AS;
+	    "DB92_OP_Data".Msg_B0[6].%X9 := "ZEN_Meld".Zulauf_PW_Auto_Frg_Aus;
+	    "DB92_OP_Data".Msg_B0[6].%X10 := "ZEN_Meld".Zulauf_RA_SA_Stillst;
+	    "DB92_OP_Data".Msg_B0[6].%X11 := "ZEN_Meld".Schlamm_Besch_Auto_Zt_max;
+	    "DB92_OP_Data".Msg_B0[6].%X12 := "DB104_Antriebe_Meld".BB_G1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[6].%X13 := "DB104_Antriebe_Meld".BB_G1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[6].%X14 := "DB104_Antriebe_Meld".BB_G2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[6].%X15 := "DB104_Antriebe_Meld".BB_G2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X0 := "DB104_Antriebe_Meld".BB_G3.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X1 := "DB104_Antriebe_Meld".BB_G3.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X2 := "DB104_Antriebe_Meld".BB_SHL_G1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X3 := "DB104_Antriebe_Meld".BB_SHL_G1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X4 := "DB104_Antriebe_Meld".BB_SHL_G2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X5 := "DB104_Antriebe_Meld".BB_SHL_G2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X6 := "DB104_Antriebe_Meld".BB_SHL_G3.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X7 := "DB104_Antriebe_Meld".BB_SHL_G3.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X8 := "DB104_Antriebe_Meld".BB_AV.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X9 := "DB104_Antriebe_Meld".BB_AV.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X10 := "DB104_Antriebe_Meld".BB_LS1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X11 := "DB104_Antriebe_Meld".BB_LS1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X12 := "DB104_Antriebe_Meld".BB_LS2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X13 := "DB104_Antriebe_Meld".BB_LS2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[7].%X14 := "DB104_Antriebe_Meld".BB1_RZP1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[7].%X15 := "DB104_Antriebe_Meld".BB1_RZP1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X0 := "DB104_Antriebe_Meld".BB1_RZP2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X1 := "DB104_Antriebe_Meld".BB1_RZP2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X2 := "DB104_Antriebe_Meld".BB1_UeSP.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X3 := "DB104_Antriebe_Meld".BB1_UeSP.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X4 := "DB104_Antriebe_Meld".BB1_AS1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X5 := "DB104_Antriebe_Meld".BB1_AS1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X6 := "DB104_Antriebe_Meld".BB1_AS2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X7 := "DB104_Antriebe_Meld".BB1_AS2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X8 := "DB104_Antriebe_Meld".BB1_SR1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X9 := "DB104_Antriebe_Meld".BB1_SR1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X10 := "DB104_Antriebe_Meld".BB1_SR2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X11 := "DB104_Antriebe_Meld".BB1_SR2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X12 := "DB104_Antriebe_Meld".BB2_RZP1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X13 := "DB104_Antriebe_Meld".BB2_RZP1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[8].%X14 := "DB104_Antriebe_Meld".BB2_RZP2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[8].%X15 := "DB104_Antriebe_Meld".BB2_RZP2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X0 := "DB104_Antriebe_Meld".BB2_UeSP.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X1 := "DB104_Antriebe_Meld".BB2_UeSP.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X2 := "DB104_Antriebe_Meld".BB2_AS1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X3 := "DB104_Antriebe_Meld".BB2_AS1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X4 := "DB104_Antriebe_Meld".BB2_AS2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X5 := "DB104_Antriebe_Meld".BB2_AS2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X6 := "DB104_Antriebe_Meld".BB2_SR1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X7 := "DB104_Antriebe_Meld".BB2_SR1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X8 := "DB104_Antriebe_Meld".BB2_SR2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X9 := "DB104_Antriebe_Meld".BB2_SR2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X10 := "DB104_Antriebe_Meld".Zulauf_AR_P1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X11 := "DB104_Antriebe_Meld".Zulauf_AR_P1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X12 := "DB104_Antriebe_Meld".Zulauf_AR_P2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X13 := "DB104_Antriebe_Meld".Zulauf_AR_P2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[9].%X14 := "DB104_Antriebe_Meld".Zulauf_AS.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[9].%X15 := "DB104_Antriebe_Meld".Zulauf_AS.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X0 := "DB104_Antriebe_Meld".Zulauf_RA_SA.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X1 := "DB104_Antriebe_Meld".Zulauf_RA_SA.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X2 := "DB104_Antriebe_Meld".Zulauf_RA_HZS.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X3 := "DB104_Antriebe_Meld".Zulauf_RA_HZS.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X4 := "DB104_Antriebe_Meld".Zulauf_RA_VKS.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X5 := "DB104_Antriebe_Meld".Zulauf_RA_VKS.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X6 := "DB104_Antriebe_Meld".Zulauf_RA_V.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X7 := "DB104_Antriebe_Meld".Zulauf_RA_V.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X8 := "DB104_Antriebe_Meld".Zulauf_RA_RP.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X9 := "DB104_Antriebe_Meld".Zulauf_RA_RP.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X10 := "DB104_Antriebe_Meld".Zulauf_RA_FP.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X11 := "DB104_Antriebe_Meld".Zulauf_RA_FP.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X12 := "DB104_Antriebe_Meld".Schlamm_BP.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X13 := "DB104_Antriebe_Meld".Schlamm_BP.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[10].%X14 := "DB104_Antriebe_Meld".Truebwasser_P1.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[10].%X15 := "DB104_Antriebe_Meld".Truebwasser_P1.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[11].%X0 := "DB104_Antriebe_Meld".Truebwasser_P2.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[11].%X1 := "DB104_Antriebe_Meld".Truebwasser_P2.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[11].%X2 := "DB104_Antriebe_Meld".Schlamm_AS.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[11].%X3 := "DB104_Antriebe_Meld".Schlamm_AS.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[11].%X4 := "DB114_MW_Meld".Zulauf_AR_Niv.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[11].%X5 := "DB114_MW_Meld".Zulauf_AR_Niv.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[11].%X6 := "DB114_MW_Meld".Zulauf_AR_Niv.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[11].%X7 := "DB114_MW_Meld".Zulauf_AR_Niv.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[11].%X8 := "DB114_MW_Meld".Zulauf_AR_Temp.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[11].%X9 := "DB114_MW_Meld".Zulauf_AR_Temp.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[11].%X10 := "DB114_MW_Meld".Zulauf_AR_Temp.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[11].%X11 := "DB114_MW_Meld".Zulauf_AR_Temp.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[11].%X12 := "DB114_MW_Meld".Zulauf_AR_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[11].%X13 := "DB114_MW_Meld".Zulauf_AR_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[11].%X14 := "DB114_MW_Meld".Zulauf_AR_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[11].%X15 := "DB114_MW_Meld".Zulauf_AR_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[12].%X0 := "DB114_MW_Meld".BB1_AS1_SS.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[12].%X1 := "DB114_MW_Meld".BB1_AS1_SS.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[12].%X2 := "DB114_MW_Meld".BB1_AS1_SS.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[12].%X3 := "DB114_MW_Meld".BB1_AS1_SS.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[12].%X4 := "DB114_MW_Meld".BB1_AS2_SS.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[12].%X5 := "DB114_MW_Meld".BB1_AS2_SS.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[12].%X6 := "DB114_MW_Meld".BB1_AS2_SS.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[12].%X7 := "DB114_MW_Meld".BB1_AS2_SS.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[12].%X8 := "DB114_MW_Meld".BB2_AS1_SS.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[12].%X9 := "DB114_MW_Meld".BB2_AS1_SS.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[12].%X10 := "DB114_MW_Meld".BB2_AS1_SS.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[12].%X11 := "DB114_MW_Meld".BB2_AS1_SS.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[12].%X12 := "DB114_MW_Meld".BB2_AS2_SS.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[12].%X13 := "DB114_MW_Meld".BB2_AS2_SS.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[12].%X14 := "DB114_MW_Meld".BB2_AS2_SS.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[12].%X15 := "DB114_MW_Meld".BB2_AS2_SS.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[13].%X0 := "DB114_MW_Meld".BB1_O2.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[13].%X1 := "DB114_MW_Meld".BB1_O2.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[13].%X2 := "DB114_MW_Meld".BB1_O2.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[13].%X3 := "DB114_MW_Meld".BB1_O2.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[13].%X4 := "DB114_MW_Meld".BB1_Temp.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[13].%X5 := "DB114_MW_Meld".BB1_Temp.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[13].%X6 := "DB114_MW_Meld".BB1_Temp.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[13].%X7 := "DB114_MW_Meld".BB1_Temp.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[13].%X8 := "DB114_MW_Meld".BB2_O2.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[13].%X9 := "DB114_MW_Meld".BB2_O2.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[13].%X10 := "DB114_MW_Meld".BB2_O2.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[13].%X11 := "DB114_MW_Meld".BB2_O2.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[13].%X12 := "DB114_MW_Meld".BB2_Temp.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[13].%X13 := "DB114_MW_Meld".BB2_Temp.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[13].%X14 := "DB114_MW_Meld".BB2_Temp.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[13].%X15 := "DB114_MW_Meld".BB2_Temp.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[14].%X0 := "DB114_MW_Meld".BB1_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[14].%X1 := "DB114_MW_Meld".BB1_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[14].%X2 := "DB114_MW_Meld".BB1_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[14].%X3 := "DB114_MW_Meld".BB1_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[14].%X4 := "DB114_MW_Meld".BB2_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[14].%X5 := "DB114_MW_Meld".BB2_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[14].%X6 := "DB114_MW_Meld".BB2_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[14].%X7 := "DB114_MW_Meld".BB2_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[14].%X8 := "DB114_MW_Meld".Zulauf_Niv.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[14].%X9 := "DB114_MW_Meld".Zulauf_Niv.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[14].%X10 := "DB114_MW_Meld".Zulauf_Niv.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[14].%X11 := "DB114_MW_Meld".Zulauf_Niv.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[14].%X12 := "DB114_MW_Meld".Zulauf_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[14].%X13 := "DB114_MW_Meld".Zulauf_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[14].%X14 := "DB114_MW_Meld".Zulauf_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[14].%X15 := "DB114_MW_Meld".Zulauf_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[15].%X0 := "DB114_MW_Meld".Verteiler_pH.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[15].%X1 := "DB114_MW_Meld".Verteiler_pH.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[15].%X2 := "DB114_MW_Meld".Verteiler_pH.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[15].%X3 := "DB114_MW_Meld".Verteiler_pH.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[15].%X4 := "DB114_MW_Meld".Verteiler_O2.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[15].%X5 := "DB114_MW_Meld".Verteiler_O2.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[15].%X6 := "DB114_MW_Meld".Verteiler_O2.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[15].%X7 := "DB114_MW_Meld".Verteiler_O2.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[15].%X8 := "DB114_MW_Meld".Verteiler_Temp.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[15].%X9 := "DB114_MW_Meld".Verteiler_Temp.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[15].%X10 := "DB114_MW_Meld".Verteiler_Temp.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[15].%X11 := "DB114_MW_Meld".Verteiler_Temp.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[15].%X12 := "DB114_MW_Meld".BB_UeSS_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[15].%X13 := "DB114_MW_Meld".BB_UeSS_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[15].%X14 := "DB114_MW_Meld".BB_UeSS_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[15].%X15 := "DB114_MW_Meld".BB_UeSS_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[16].%X0 := "DB114_MW_Meld".Ablauf_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[16].%X1 := "DB114_MW_Meld".Ablauf_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[16].%X2 := "DB114_MW_Meld".Ablauf_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[16].%X3 := "DB114_MW_Meld".Ablauf_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[16].%X4 := "DB114_MW_Meld".Ablauf_pH.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[16].%X5 := "DB114_MW_Meld".Ablauf_pH.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[16].%X6 := "DB114_MW_Meld".Ablauf_pH.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[16].%X7 := "DB114_MW_Meld".Ablauf_pH.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[16].%X8 := "DB114_MW_Meld".Ablauf_O2.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[16].%X9 := "DB114_MW_Meld".Ablauf_O2.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[16].%X10 := "DB114_MW_Meld".Ablauf_O2.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[16].%X11 := "DB114_MW_Meld".Ablauf_O2.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[16].%X12 := "DB114_MW_Meld".Ablauf_Temp.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[16].%X13 := "DB114_MW_Meld".Ablauf_Temp.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[16].%X14 := "DB114_MW_Meld".Ablauf_Temp.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[16].%X15 := "DB114_MW_Meld".Ablauf_Temp.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[17].%X0 := "DB114_MW_Meld".Schlamm_ED_Niv.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[17].%X1 := "DB114_MW_Meld".Schlamm_ED_Niv.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[17].%X2 := "DB114_MW_Meld".Schlamm_ED_Niv.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[17].%X3 := "DB114_MW_Meld".Schlamm_ED_Niv.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[17].%X4 := "DB114_MW_Meld".Schlamm_Besch_Niv.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[17].%X5 := "DB114_MW_Meld".Schlamm_Besch_Niv.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[17].%X6 := "DB114_MW_Meld".Schlamm_Besch_Niv.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[17].%X7 := "DB114_MW_Meld".Schlamm_Besch_Niv.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[17].%X8 := "DB114_MW_Meld".Schlamm_Besch_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[17].%X9 := "DB114_MW_Meld".Schlamm_Besch_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[17].%X10 := "DB114_MW_Meld".Schlamm_Besch_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[17].%X11 := "DB114_MW_Meld".Schlamm_Besch_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[17].%X12 := "DB114_MW_Meld".Truebwasser_Niv.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[17].%X13 := "DB114_MW_Meld".Truebwasser_Niv.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[17].%X14 := "DB114_MW_Meld".Truebwasser_Niv.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[17].%X15 := "DB114_MW_Meld".Truebwasser_Niv.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[18].%X0 := "DB114_MW_Meld".Truebwasser_DF.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[18].%X1 := "DB114_MW_Meld".Truebwasser_DF.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[18].%X2 := "DB114_MW_Meld".Truebwasser_DF.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[18].%X3 := "DB114_MW_Meld".Truebwasser_DF.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[18].%X4 := "DB114_MW_Meld".Zulauf_SF_Niv.Stoerung.GW_HH;
+	    "DB92_OP_Data".Msg_B0[18].%X5 := "DB114_MW_Meld".Zulauf_SF_Niv.Stoerung.GW_H;
+	    "DB92_OP_Data".Msg_B0[18].%X6 := "DB114_MW_Meld".Zulauf_SF_Niv.Stoerung.GW_L;
+	    "DB92_OP_Data".Msg_B0[18].%X7 := "DB114_MW_Meld".Zulauf_SF_Niv.Stoerung.GW_LL;
+	    "DB92_OP_Data".Msg_B0[18].%X8 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[18].%X9 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[18].%X10 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[18].%X11 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[18].%X12 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[18].%X13 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[18].%X14 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[18].%X15 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[19].%X0 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[19].%X1 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[19].%X2 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[19].%X3 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[19].%X4 := "DB118_PW_Meld".FW_APW_Oeb_KB.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[19].%X5 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[19].%X6 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[19].%X7 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[19].%X8 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[19].%X9 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[19].%X10 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[19].%X11 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[19].%X12 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[19].%X13 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[19].%X14 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[19].%X15 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[20].%X0 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[20].%X1 := "DB118_PW_Meld".FW_APW_BrR_DM.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[20].%X2 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[20].%X3 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[20].%X4 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[20].%X5 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[20].%X6 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[20].%X7 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[20].%X8 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[20].%X9 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[20].%X10 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[20].%X11 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[20].%X12 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[20].%X13 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[20].%X14 := "DB118_PW_Meld".FW_APW_Oeb_Tu.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[20].%X15 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[21].%X0 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[21].%X1 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[21].%X2 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[21].%X3 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[21].%X4 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[21].%X5 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[21].%X6 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[21].%X7 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[21].%X8 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[21].%X9 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[21].%X10 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[21].%X11 := "DB118_PW_Meld".FW_APW_Oeb_KS.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[21].%X12 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[21].%X13 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[21].%X14 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[21].%X15 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[22].%X0 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[22].%X1 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[22].%X2 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[22].%X3 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[22].%X4 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[22].%X5 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[22].%X6 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[22].%X7 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[22].%X8 := "DB118_PW_Meld".FW_APW_Oeb_PG.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[22].%X9 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[22].%X10 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[22].%X11 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[22].%X12 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[22].%X13 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[22].%X14 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[22].%X15 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[23].%X0 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[23].%X1 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[23].%X2 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[23].%X3 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[23].%X4 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[23].%X5 := "DB118_PW_Meld".FW_APW_Oeb_LW.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[23].%X6 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[23].%X7 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[23].%X8 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[23].%X9 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[23].%X10 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[23].%X11 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[23].%X12 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[23].%X13 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[23].%X14 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[23].%X15 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[24].%X0 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[24].%X1 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[24].%X2 := "DB118_PW_Meld".FW_APW_GeD_WG.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[24].%X3 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[24].%X4 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[24].%X5 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[24].%X6 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[24].%X7 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[24].%X8 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[24].%X9 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[24].%X10 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[24].%X11 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[24].%X12 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[24].%X13 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[24].%X14 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[24].%X15 := "DB118_PW_Meld".FW_APW_GeD_AA.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[25].%X0 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[25].%X1 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[25].%X2 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[25].%X3 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[25].%X4 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[25].%X5 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[25].%X6 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[25].%X7 := "DB118_PW_Meld".FW_APW_WaD.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[25].%X8 := "DB118_PW_Meld".FW_APW_WaD.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[25].%X9 := "DB118_PW_Meld".FW_APW_WaD.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[25].%X10 := "DB118_PW_Meld".FW_APW_WaD.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[25].%X11 := "DB118_PW_Meld".FW_APW_WaD.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[25].%X12 := "DB118_PW_Meld".FW_APW_WaD.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[25].%X13 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[25].%X14 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[25].%X15 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[26].%X0 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[26].%X1 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[26].%X2 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[26].%X3 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[26].%X4 := "DB118_PW_Meld".FW_APW_WeD.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[26].%X5 := "DB118_PW_Meld".FW_APW_WeD.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[26].%X6 := "DB118_PW_Meld".FW_APW_WeD.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[26].%X7 := "DB118_PW_Meld".FW_APW_WeD.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[26].%X8 := "DB118_PW_Meld".FW_APW_WeD.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[26].%X9 := "DB118_PW_Meld".FW_APW_WeD.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[26].%X10 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[26].%X11 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[26].%X12 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[26].%X13 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[26].%X14 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[26].%X15 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[27].%X0 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[27].%X1 := "DB118_PW_Meld".FW_APW_NiD.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[27].%X2 := "DB118_PW_Meld".FW_APW_NiD.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[27].%X3 := "DB118_PW_Meld".FW_APW_NiD.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[27].%X4 := "DB118_PW_Meld".FW_APW_NiD.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[27].%X5 := "DB118_PW_Meld".FW_APW_NiD.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[27].%X6 := "DB118_PW_Meld".FW_APW_NiD.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[27].%X7 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[27].%X8 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[27].%X9 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[27].%X10 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[27].%X11 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[27].%X12 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[27].%X13 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[27].%X14 := "DB118_PW_Meld".FW_APW_LoS.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[27].%X15 := "DB118_PW_Meld".FW_APW_LoS.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[28].%X0 := "DB118_PW_Meld".FW_APW_LoS.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[28].%X1 := "DB118_PW_Meld".FW_APW_LoS.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[28].%X2 := "DB118_PW_Meld".FW_APW_LoS.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[28].%X3 := "DB118_PW_Meld".FW_APW_LoS.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[28].%X4 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[28].%X5 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[28].%X6 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[28].%X7 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[28].%X8 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[28].%X9 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[28].%X10 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[28].%X11 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[28].%X12 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[28].%X13 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[28].%X14 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[28].%X15 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[29].%X0 := "DB118_PW_Meld".FW_APW_Oeb_Ge.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[29].%X1 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[29].%X2 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[29].%X3 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[29].%X4 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[29].%X5 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[29].%X6 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[29].%X7 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[29].%X8 := "DB118_PW_Meld".FW_APW_BuH.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[29].%X9 := "DB118_PW_Meld".FW_APW_BuH.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[29].%X10 := "DB118_PW_Meld".FW_APW_BuH.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[29].%X11 := "DB118_PW_Meld".FW_APW_BuH.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[29].%X12 := "DB118_PW_Meld".FW_APW_BuH.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[29].%X13 := "DB118_PW_Meld".FW_APW_BuH.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[29].%X14 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_St;
+	    "DB92_OP_Data".Msg_B0[29].%X15 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_P_St;
+	    "DB92_OP_Data".Msg_B0[30].%X0 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_Ausf1;
+	    "DB92_OP_Data".Msg_B0[30].%X1 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_Ausf2;
+	    "DB92_OP_Data".Msg_B0[30].%X2 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_P1_St;
+	    "DB92_OP_Data".Msg_B0[30].%X3 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_P2_St;
+	    "DB92_OP_Data".Msg_B0[30].%X4 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_Niv_max;
+	    "DB92_OP_Data".Msg_B0[30].%X5 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.FWA_EA_St;
+	    "DB92_OP_Data".Msg_B0[30].%X6 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.Kom_St;
+	    "DB92_OP_Data".Msg_B0[30].%X7 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.MW_Niv_St;
+	    "DB92_OP_Data".Msg_B0[30].%X8 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.MW_DF_St;
+	    "DB92_OP_Data".Msg_B0[30].%X9 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.MW_Dr_St;
+	    "DB92_OP_Data".Msg_B0[30].%X10 := "DB118_PW_Meld".FW_APW_BrR_TS.Status.MW_Res_St;
+	    "DB92_OP_Data".Msg_B0[30].%X11 := "DB104_Antriebe_Meld".BB1_SR_K.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[30].%X12 := "DB104_Antriebe_Meld".BB1_SR_K.Stoerung.Wa_Wart;
+	    "DB92_OP_Data".Msg_B0[30].%X13 := "DB104_Antriebe_Meld".BB2_SR_K.Stoerung.Wa_EZ;
+	    "DB92_OP_Data".Msg_B0[30].%X14 := "DB104_Antriebe_Meld".BB2_SR_K.Stoerung.Wa_Wart;
+	    
+	    
+	END_IF;
+	
+	
+END_FUNCTION
+
+FUNCTION "Allgemein" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_TEMP 
+      retval : Int;
+      b_tmp : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	//Anlaufphase
+	//
+	
+	IF "FirstScan" THEN
+	    "SPS_Anlauf" := 0;
+	    "DB92_OP_Data".SPS_Idx := "SPS_Idx_eigen";
+	    "DB92_OP_Data".SPS_Idx_BitIdx := SHL(IN := BYTE#1, N := INT_TO_UINT("SPS_Idx_eigen"));
+	END_IF;
+	    
+	
+	"FC61_TON_s"(enable:="SPS_Anlauf",
+	           Imp:="Imp_Sek",
+	           TmrMax:=5,
+	           TmrVar:="Tmr_Anlauf_AG",
+	           Q:=#b_tmp);
+	
+	IF #b_tmp THEN
+	    "Wiederanlauf" := 1;
+	END_IF;
+	IF NOT "SPS_Anlauf" THEN
+	    "Wiederanlauf_NA_chk" := 1;
+	END_IF;
+	
+	//Ablauf nach Netzwiederkehr
+	//Zuweisung setzen!!
+	"Notstrombetrieb" := 0;
+	"Netzausfall" := ( ("ZEN_Meld".E_NSHV_NA OR NOT "ZEN_Meld".E_NSHV_LS_Aus) AND NOT "Notstrombetrieb")AND FALSE;
+	"ZEN_Meld".ZEN_NA_res := "Netzausfall";
+	
+	//nach Freigabe Peripherie Netzausfallsignal berücksichtigen
+	#b_tmp := NOT "Netzausfall";
+	
+	"FC61_TON_s"(enable := #b_tmp,
+	           Imp := "Imp_Sek",
+	           TmrMax := 30,
+	           TmrVar := "Tmr_Netzwiederkehr",
+	           Q := #b_tmp);
+	
+	IF ("Freigabe_Peripherie" AND NOT "Netzausfall") OR #b_tmp THEN
+	    "Freigabe_Verbraucher" := 1;
+	END_IF;
+	
+	//Erzeugung globaler Quittierimpuls
+	//
+	//"UV_DEK_Bef".KAW_DEK_BF_Quit OR ("UV_DEK_Bef_UV".KAW_DEK_BF_Quit AND "UV_DEK_Meld".KAW_DEK_Bed_aktiv)
+	//
+	"FC62_TOF_s"(enable:="ZEN_Bef".ZEN_Quit_BF,
+	             Imp:="Imp_Sek",
+	             TmrMax:=2,
+	             TmrVar:="Tmr_GlobalQuit",
+	             Q:="Global_Quit");
+	//Quittierung Meldesystem OP triggern
+	"DB92_OP_Data".MsgQuit := (("ZEN_Bef".ZEN_Quit_BF) AND "ZEN_Meld".ZEN_Bed_aktiv);
+	
+	
+	"ZEN_Bef".ZEN_Quit_BF := 0;
+	
+	
+	//Uhrzeitverwaltung
+	//
+	
+	"IDB_FB51_Time"();
+	
+	
+	
+	//Abfrage DP-Teilnehmer nach SPS-Anlauf
+	
+	"FC61_TON_s"(enable := "Wiederanlauf",
+	           Imp := "Imp_Sek",
+	           TmrMax := 2,
+	           TmrVar := "Tmr_Freigabe_Peripherie",
+	           Q := #b_tmp);
+	IF #b_tmp THEN
+	    "Freigabe_Peripherie" := 1;
+	    "Freigabe_Zyklus" := 1;
+	    #retval:=DeviceStates(LADDR := 259, MODE := 4, STATE := "DB91_DP_aktiv".Tln);
+	END_IF;
+	
+	
+	
+	
+END_FUNCTION
+
+FUNCTION_BLOCK "FB55_PulsPause"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      enable { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      Pulszeit { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+      Pausenzeit { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+   END_VAR
+
+   VAR_OUTPUT 
+      Operation { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+   END_VAR
+
+   VAR 
+      Tmr_Zt_Puls {InstructionName := 'TON_TIME'; LibVersion := '1.0'; ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : TON_TIME;
+      Tmr_Zt_Pause {InstructionName := 'TON_TIME'; LibVersion := '1.0'; ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : TON_TIME;
+      aktiv { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      FM_init { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+   END_VAR
+
+
+BEGIN
+	
+	IF #enable AND #Pulszeit>0 AND #Pausenzeit>0 THEN
+	    IF NOT #aktiv AND NOT #Tmr_Zt_Pause.Q THEN
+	        #aktiv := 1;
+	    END_IF;
+	ELSE
+	    #aktiv := 0;
+	END_IF;
+	#FM_init := #enable;
+	
+	#Tmr_Zt_Puls(IN:=#aktiv,
+	             PT:=DINT_TO_TIME(#Pulszeit*DINT#1000));
+	
+	#Tmr_Zt_Pause(IN := #Tmr_Zt_Puls.Q,
+	              PT := DINT_TO_TIME(#Pausenzeit * DINT#1000));
+	
+	IF #Tmr_Zt_Pause.Q THEN
+	    #aktiv := 0;
+	END_IF;
+	#Operation := (#aktiv AND NOT #Tmr_Zt_Puls.Q) OR (#enable AND (#Pausenzeit = 0));
+END_FUNCTION_BLOCK
+
+FUNCTION_BLOCK "FB59_Mittelwert_imp"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Zeitfenster { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt := 60;
+      Rohwert { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      Rohwert_nok { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+      Imp { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Mittelwert { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+   END_VAR
+
+   VAR_IN_OUT 
+      MemDB : "T_MW_MITTEL";
+   END_VAR
+
+   VAR 
+      DataIdx_max { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      curInIdx { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      valid_Window { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+   END_VAR
+
+   VAR_TEMP 
+      i : Int;
+      s : Real;
+   END_VAR
+
+   VAR CONSTANT 
+      MaxEntries : Int := 120;
+   END_VAR
+
+
+BEGIN
+	    IF #Zeitfenster <= 0 THEN
+	        #DataIdx_max := 0;
+	    ELSIF #Zeitfenster > #MaxEntries THEN
+	        #DataIdx_max := #MaxEntries - 1;
+	    ELSE
+	        #DataIdx_max := DINT_TO_INT(#Zeitfenster) - 1;
+	    END_IF;
+	    IF #Rohwert_nok OR #DataIdx_max = 0 THEN
+	        #curInIdx := 0;
+	        #valid_Window := 0;
+	        #Mittelwert := #Rohwert;
+	    ELSE
+	        
+	        IF #Imp THEN
+	            #MemDB.Values[#curInIdx] := #Rohwert;
+	            #curInIdx := #curInIdx + 1;
+	            IF #curInIdx > #DataIdx_max THEN
+	                #curInIdx := 0;
+	            END_IF;
+	            #s := 0.0;
+	            FOR #i := 0 TO #valid_Window DO
+	                #s := #s + #MemDB.Values[#i];
+	            END_FOR;
+	            #Mittelwert := #s / (INT_TO_REAL(#valid_Window + 1));
+	            IF #valid_Window < #DataIdx_max THEN
+	                #valid_Window := #valid_Window + 1;
+	            ELSE
+	                #valid_Window := #DataIdx_max;
+	            END_IF;
+	        END_IF;
+	    END_IF;
+	    
+END_FUNCTION_BLOCK
+
+ORGANIZATION_BLOCK "Main"
+TITLE = "Main Program Sweep (Cycle)"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+	
+	
+	"Allgemein"();
+	"Peripherie"();
+	
+	IF "Freigabe_Zyklus" THEN
+	    
+	    "FB1_Antriebe_IDB"();
+	    "FB2_Messwerte_IDB"();
+	    "FB3_Automatik_Belebung_IDB"();
+	    "FB4_Automatik_Biocos_IDB"();
+	    "FB5_Automatik_Zulauf_Ablauf_IDB"();
+	    
+	    
+	    "FB6_Kommunikation_IDB"();
+	    "FB7_Pumpwerke_IDB"();
+	    
+	    "FB8_Leitstelle_IDB"();
+	    "FB9_USV_Kom_IDB"();
+	    
+	END_IF;
+	
+	
+	"SPS_Anlauf" := 1;
+END_ORGANIZATION_BLOCK
+
